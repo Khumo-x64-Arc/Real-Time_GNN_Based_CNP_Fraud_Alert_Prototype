@@ -1,0 +1,157 @@
+{
+ "title": "Oversampling ablation from the study (cycle 4)",
+ "note": "Semi-supervised GNN with 20% of labels revealed, labels arriving late, three agents per policy; one label mask and one GNN per dataset. Test F1 per decision policy, and the PR-AUC of the GNN itself.",
+ "policies": [
+  {
+   "key": "fixed",
+   "label": "GNN, fixed threshold"
+  },
+  {
+   "key": "static",
+   "label": "Best fixed setting"
+  },
+  {
+   "key": "agent",
+   "label": "RL agent (mean of 3)"
+  },
+  {
+   "key": "online",
+   "label": "RL agent, learning online (mean of 3)"
+  },
+  {
+   "key": "no_gnn",
+   "label": "RL agent without the GNN (mean of 3)"
+  }
+ ],
+ "datasets": [
+  {
+   "name": "European Cardholder",
+   "gnn_pr_auc": {
+    "with": 0.7052,
+    "without": 0.8007
+   },
+   "fixed_false_alarms": {
+    "with": 62,
+    "without": 31
+   },
+   "f1": {
+    "fixed": {
+     "with": 0.5753,
+     "with_sd": 0,
+     "without": 0.7374,
+     "without_sd": 0
+    },
+    "static": {
+     "with": 0.5753,
+     "with_sd": 0,
+     "without": 0.7374,
+     "without_sd": 0
+    },
+    "agent": {
+     "with": 0.5154,
+     "with_sd": 0.0212,
+     "without": 0.5712,
+     "without_sd": 0.1193
+    },
+    "online": {
+     "with": 0.4864,
+     "with_sd": 0.03,
+     "without": 0.5722,
+     "without_sd": 0.0931
+    },
+    "no_gnn": {
+     "with": 0.4773,
+     "with_sd": 0.0793,
+     "without": 0.5816,
+     "without_sd": 0.1363
+    }
+   }
+  },
+  {
+   "name": "IEEE-CIS",
+   "gnn_pr_auc": {
+    "with": 0.3516,
+    "without": 0.3731
+   },
+   "fixed_false_alarms": {
+    "with": 1619,
+    "without": 1731
+   },
+   "f1": {
+    "fixed": {
+     "with": 0.3829,
+     "with_sd": 0,
+     "without": 0.4027,
+     "without_sd": 0
+    },
+    "static": {
+     "with": 0.4121,
+     "with_sd": 0,
+     "without": 0.4412,
+     "without_sd": 0
+    },
+    "agent": {
+     "with": 0.3977,
+     "with_sd": 0.0032,
+     "without": 0.3992,
+     "without_sd": 0.0034
+    },
+    "online": {
+     "with": 0.4021,
+     "with_sd": 0.0042,
+     "without": 0.404,
+     "without_sd": 0.0081
+    },
+    "no_gnn": {
+     "with": 0.3835,
+     "with_sd": 0.0056,
+     "without": 0.3674,
+     "without_sd": 0.0064
+    }
+   }
+  },
+  {
+   "name": "Synthetic South African card file",
+   "gnn_pr_auc": {
+    "with": 0.6229,
+    "without": 0.6213
+   },
+   "fixed_false_alarms": {
+    "with": 29,
+    "without": 30
+   },
+   "f1": {
+    "fixed": {
+     "with": 0.5882,
+     "with_sd": 0,
+     "without": 0.6143,
+     "without_sd": 0
+    },
+    "static": {
+     "with": 0.549,
+     "with_sd": 0,
+     "without": 0.5872,
+     "without_sd": 0
+    },
+    "agent": {
+     "with": 0.567,
+     "with_sd": 0.0359,
+     "without": 0.5684,
+     "without_sd": 0.0181
+    },
+    "online": {
+     "with": 0.5993,
+     "with_sd": 0.0266,
+     "without": 0.5963,
+     "without_sd": 0.0162
+    },
+    "no_gnn": {
+     "with": 0.3649,
+     "with_sd": 0.0197,
+     "without": 0.3725,
+     "without_sd": 0.0242
+    }
+   }
+  }
+ ]
+}
