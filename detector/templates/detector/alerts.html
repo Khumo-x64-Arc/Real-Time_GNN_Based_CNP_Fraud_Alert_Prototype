@@ -1,0 +1,44 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Alerts</h1><p class="muted">Every transaction the live monitor or the API flagged. Mark each one so you can see how often alerts are right.</p></div>
+  {% if total %}<form method="post" action="{% url 'alerts_clear' %}" onsubmit="return confirm('Delete {% if filters.dataset %}this dataset\'s{% else %}all{% endif %} alerts?')">{% csrf_token %}<input type="hidden" name="dataset" value="{{ filters.dataset }}"><button class="btn danger small">Clear {% if filters.dataset %}this dataset's{% else %}all{% endif %} alerts</button></form>{% endif %}
+</div>
+<form class="filters" method="get">
+  <div class="field"><label for="f-ds">Dataset</label><select id="f-ds" name="dataset"><option value="">All</option>{% for d in datasets %}<option value="{{ d.pk }}" {% if filters.dataset == d.pk|stringformat:"s" %}selected{% endif %}>{{ d.name }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="f-l">Level</label><select id="f-l" name="level"><option value="">All</option>{% for v, l in levels %}<option value="{{ v }}" {% if filters.level == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="f-r">Review</label><select id="f-r" name="review"><option value="">All</option>{% for v, l in reviews %}<option value="{{ v }}" {% if filters.review == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+  <button class="btn ghost">Filter</button>
+  <span class="small muted">{{ total|floatformat:"0g" }} alert{{ total|pluralize }}{% if total > 300 %}, newest 300 shown{% endif %}</span>
+</form>
+{% if alerts %}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Transaction</th><th>Level</th><th class="n">Amount</th><th>Why</th><th class="n">GNN score</th><th>In the data</th><th>Review</th></tr></thead>
+  <tbody>
+  {% for a in alerts %}
+    <tr>
+      <td><a href="{% url 'alert_detail' a.pk %}"><b>{{ a.transaction_id }}</b></a><div class="small muted">{{ a.dataset.name }} · {{ a.occurred_at }}</div><div class="small muted">{{ a.account }}{% if a.merchant %} at {{ a.merchant }}{% endif %}{% if a.country %} ({{ a.country }}){% endif %}</div></td>
+      <td><span class="level {{ a.level }}">{{ a.get_level_display }}</span><div class="small muted">via {{ a.source }}</div></td>
+      <td class="n">{{ a.amount|money }}</td>
+      <td>{% if a.explanation.summary %}<p class="small" style="margin:0 0 .3rem;max-width:48ch">{{ a.explanation.summary|truncatewords:28 }}</p><a class="small" href="{% url 'alert_detail' a.pk %}">Full explanation</a>{% elif a.signals %}<ul class="reasons">{% for s in a.signals %}<li>{{ s.text }}</li>{% endfor %}</ul>{% else %}<span class="small muted">No behavioural signal; GNN score only</span>{% endif %}</td>
+      <td class="n">{{ a.score|pct:1 }}</td>
+      <td>{% if a.customer_response == "not_mine" %}<span class="level fraud small">Customer: not me</span><br>{% elif a.customer_response == "mine" %}<span class="small" style="color:var(--review);font-weight:600">Customer: it was me</span><br>{% endif %}{% if a.actual_label == 1 %}<span class="truth hit">Fraud</span>{% elif a.actual_label == 0 %}<span class="muted">Legitimate</span>{% else %}<span class="muted">Unknown</span>{% endif %}</td>
+      <td>
+        <form method="post" action="{% url 'alert_review' a.pk %}" class="review-btns">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+          {% if a.review == "open" %}
+          <button class="btn small" name="review" value="confirmed">Confirm fraud</button>
+          <button class="btn ghost small" name="review" value="dismissed">False alarm</button>
+          {% else %}<span class="small">{{ a.get_review_display }}</span> <button class="btn ghost small" name="review" value="open">Reopen</button>{% endif %}
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="panel empty"><h3>No alerts{% if filters.dataset or filters.level or filters.review %} match these filters{% endif %}</h3><p>Start the live monitor to stream transactions through the GNN.</p><a class="btn" href="{% url 'monitor' %}">Open live monitor</a></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,26 @@
+{% load static %}<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}My account{% endblock %} · Khumo Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'detector/app.css' %}">
+  <link rel="icon" type="image/png" href="{% static 'detector/img/favicon.png' %}">
+</head>
+<body class="cust">
+  <header class="top cust-top">
+    <a class="brand" href="{% url 'customer_dashboard' %}">
+      <img class="brand-full" src="{% static 'detector/img/logo-480.png' %}" alt="Khumo Detection" width="180" height="62">
+      <img class="brand-mark" src="{% static 'detector/img/emblem.png' %}" alt="Khumo Detection" width="44" height="44">
+    </a>
+    <span class="spacer"></span>
+    {% block header_right %}{% endblock %}
+  </header>
+  <main class="cust-main">
+    {% for m in messages %}<div class="flash {{ m.tags }}" role="status">{{ m }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  {% include "detector/_site_footer.html" %}
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  {% block scripts %}{% endblock %}
+</body></html>

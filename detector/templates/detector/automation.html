@@ -1,0 +1,59 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}Automated detection{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Automated detection</h1>
+    <p class="muted">A GNN trained on 20% of a card file's labels scores every transaction, and the reinforcement-learning agent decides every transaction on its own: it blocks and opens cases, escalates to analysts, holds back, or approves, and learns from fraud labels as they arrive.</p>
+  </div>
+</div>
+<div class="grid-2">
+  <section class="panel">
+    <h2 style="margin-top:0">Start a run</h2>
+    <form method="post" enctype="multipart/form-data" class="stack tr-form">{% csrf_token %}
+      {% for e in form.non_field_errors %}<div class="small" style="color:var(--fraud)">{{ e }}</div>{% endfor %}
+      <div><label for="{{ form.file.id_for_label }}">{{ form.file.label }}</label>{{ form.file }}{% for e in form.file.errors %}<div class="small" style="color:var(--fraud)">{{ e }}</div>{% endfor %}
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.file.help_text }}</p></div>
+      <div><label for="{{ form.name.id_for_label }}">Name (optional)</label>{{ form.name }}</div>
+      <div><label class="check">{{ form.inject_rings }} {{ form.inject_rings.label }}</label>
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.inject_rings.help_text }}</p>
+        <div class="inline-field"><label for="{{ form.ring_seed.id_for_label }}" class="small">{{ form.ring_seed.label }}</label> {{ form.ring_seed }}</div></div>
+      <div><label class="check">{{ form.inject_adversarial }} {{ form.inject_adversarial.label }}</label>
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.inject_adversarial.help_text }}</p>
+        <label class="check" style="margin-top:.35rem">{{ form.adversarial_training }} {{ form.adversarial_training.label }}</label>
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.adversarial_training.help_text }}</p></div>
+      <p class="small muted">A run takes about 5 minutes on two CPU cores; planting adversarial examples adds one to two.</p>
+      <button class="btn" type="submit">Run</button>
+    </form>
+    <p class="small muted">From the command line: <code>python manage.py inject_rings credit_card_clean.csv credit_card_rings.csv</code>, then <code>python manage.py automate_detection --target credit_card_rings.csv</code>. Adversarial test: <code>python manage.py automate_detection --target credit_card_clean.csv --adversarial [--adversarial-training]</code>.</p>
+  </section>
+  <section class="panel">
+    <h2 style="margin-top:0">What happens</h2>
+    <ol class="small tr-steps">
+      <li><b>The GNN</b> is trained on the file's revealed labels (20%), on the first 60% of the file in time; every transaction is then scored using only earlier transactions.</li>
+      <li><b>The agent</b> learns on the validation period, two hours at a time, with labels arriving six hours late: it sets the alert threshold, how much to trust evidence from linked accounts, cards and devices, and whether to pseudo-label.</li>
+      <li><b>Automation.</b> The best agent runs the test period alone and keeps learning. Every transaction is blocked into a case, escalated, held back (with the reason) or approved.</li>
+      <li><b>Cases and rings.</b> Escalations that share a card, device, IP address, account (24 h) or merchant (72 h, across accounts) are grouped; a case across two or more accounts is a ring.</li>
+      <li><b>Adversarial examples (optional).</b> Frauds built to evade the GNN, including a white-box attack that edits them until the GNN stops flagging them. The run page shows how many of each kind the GNN and the agent still caught, and with adversarial training whether the attacker can adapt.</li>
+      <li><b>Planted rings (optional).</b> Six rings of known members are added to the file. The run page then shows, ring by ring, how many of the test-period ring transactions the agent escalated and grouped into ring cases.</li>
+    </ol>
+  </section>
+</div>
+<h2>Runs</h2>
+{% if runs %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Run</th><th>Status</th><th>Deployed on</th><th class="n">Frauds escalated</th><th class="n">False alarms</th><th class="n">Cases (rings)</th><th class="n">Planted ring tx in ring cases</th><th class="n">Adversarial frauds escalated</th><th>Started</th></tr></thead>
+  <tbody>{% for r in runs %}
+    <tr><td><a href="{{ r.get_absolute_url }}">{{ r.name }}</a></td>
+      <td><span class="status {{ r.status }}">{{ r.get_status_display }}</span>{% if r.status == "running" or r.status == "queued" %} <span class="small muted">{{ r.progress }}%</span>{% endif %}</td>
+      <td class="small">{{ r.results.deployed|default:"–" }}</td>
+      <td class="n">{% if r.results.automation %}{{ r.results.automation.metrics.tp }} of {{ r.results.target.test_frauds }}{% else %}–{% endif %}</td>
+      <td class="n">{{ r.results.automation.metrics.fp|default:"–" }}</td>
+      <td class="n">{% if r.results.automation %}{{ r.results.automation.case_stats.cases }} ({{ r.results.automation.case_stats.rings }}){% else %}–{% endif %}</td>
+      <td class="n">{% with k=r.results.automation.known_rings %}{% if k %}{{ k|ring_grouped }}{% else %}–{% endif %}{% endwith %}</td>
+      <td class="n">{% with k=r.results.automation.adversarial %}{% if k %}{{ k|adv_escalated }}{% else %}–{% endif %}{% endwith %}</td>
+      <td class="small muted">{{ r.created_at|date:"j M Y, H:i" }}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% else %}<p class="muted">No runs yet.</p>{% endif %}
+{% endblock %}

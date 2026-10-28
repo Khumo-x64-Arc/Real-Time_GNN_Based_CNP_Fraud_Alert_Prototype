@@ -1,0 +1,243 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}{{ run.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="small muted" style="margin:0"><a href="{% url 'automation' %}">Automated detection</a></p>
+    <h1>{{ run.name }}</h1>
+    {% if res %}
+    <ul class="facts">
+      <li><b>{{ res.target.test_rows|floatformat:"0g" }}</b> test transactions decided by the agent</li>
+      <li><b>{{ res.target.test_frauds }}</b> frauds among them</li>
+      <li>{{ res.params.label_rate|pct:0 }} of labels, arriving {{ res.params.delay_windows }} windows ({{ res.params.delay_windows|mul:res.params.window_hours|floatformat:0 }} h) late</li>
+      <li>{{ res.params.agent_seeds }} agents × {{ res.params.episodes }} episodes per base GNN</li>
+      {% if run.has_rings %}<li><a href="#known-rings">{{ run.params.rings|length }} planted fraud rings</a></li>{% endif %}
+      {% if run.has_adversarial %}<li><a href="#adversarial">adversarial examples{% if run.params.adversarial.training %}, adversarial training{% endif %}</a></li>{% endif %}
+    </ul>
+    {% endif %}
+  </div>
+  <form method="post" action="{% url 'automation_delete' run.pk %}" class="actions" onsubmit="return confirm('Delete this run?')">{% csrf_token %}<button class="btn danger">Delete</button></form>
+</div>
+
+{% if run.status == "queued" or run.status == "running" %}
+<section class="panel" id="training" data-status-url="{% url 'automation_status' run.pk %}">
+  <h2 style="margin-top:0">Running</h2>
+  <p class="muted" id="progress-msg">{{ run.progress_message|default:"Waiting to start" }}</p>
+  <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ run.progress }}"><i style="width: {{ run.progress }}%"></i></div>
+  <p class="small muted">Training nine agents takes about half an hour on two CPU cores. This page updates by itself.</p>
+</section>
+{% elif run.status == "failed" %}
+<section class="panel" style="border-left:4px solid var(--fraud)"><h2 style="margin-top:0">The run stopped with an error</h2><p>{{ run.error }}</p></section>
+{% else %}
+
+<section class="panel verdict">
+  <p style="margin:0">The agent ran the test period on top of {% if dep_label == "Zero-shot" or dep_label == "Fine-tuned" %}the base GNN <b>{{ dep_name }}</b>{% else %}the GNN trained on the revealed labels{% endif %}: of {{ res.params.agent_seeds }} agents trained on the validation period, the one with the most reward. Learning online from the delayed labels, it escalated <b>{{ a.metrics.tp }}</b> of {{ test_frauds }} frauds with <b>{{ a.metrics.fp }}</b> false alarms (precision {{ a.metrics.precision|pct:0 }}, recall {{ a.metrics.recall|pct:0 }}, F1 {{ a.metrics.f1|num:3 }}). The same GNN at a fixed threshold escalated {{ fixed.tp }} with {{ fixed.fp }} false alarms (F1 {{ fixed.f1|num:3 }}).</p>
+  <p class="small muted" style="margin:.5rem 0 0">Labels are used only as they would arrive in a bank: 20% of transactions, {{ res.params.delay_windows|mul:res.params.window_hours|floatformat:0 }} hours later. Every true label is used afterwards, for the counts on this page.</p>
+</section>
+
+<h2>What the agent decided</h2>
+<div class="tiles">
+  {% for t in tiles %}
+  <div class="tile tile-{{ t.key }}">
+    <div class="tile-n">{{ t.n|floatformat:"0g" }}</div>
+    <div class="tile-l">{{ t.label }}</div>
+    <div class="small muted">{{ t.frauds }} actually fraud{% if t.n %} ({{ t.frauds|floatformat:0 }}/{{ t.n }}){% endif %}</div>
+    <a class="small" href="{% url 'automation_decisions' run.pk %}?decision={{ t.key }}">CSV</a>
+  </div>
+  {% endfor %}
+</div>
+<p class="note">Of the {{ test_frauds }} test frauds, {{ a.missed_frauds.escalated }} were escalated (blocked into a case or sent to an analyst), {{ a.missed_frauds.held_back }} were held back and {{ a.missed_frauds.approved }} were approved. "Held back" means suspicious but not escalated: the GNN alone would have alerted, or the score was within 1 log-odds of the agent's threshold. <a href="{% url 'automation_decisions' run.pk %}">Download every decision (CSV)</a> with its scores, threshold, graph evidence and reason.</p>
+
+{% if adv %}
+<h2 id="adversarial">Adversarial examples: can the GNN and the agent detect them?</h2>
+<section class="panel verdict">
+  <p style="margin:0">{% if adv_setup.adversarial_training %}With <b>adversarial training</b>: the attacks were also planted in the training period (with the same 20% of labels revealed), and the attacker then re-optimised group A4 against the retrained GNN.{% else %}The attacks appear only in the test period: the GNN and the agent never saw them in training.{% endif %}
+  {% for p in adv_paths %}{% if forloop.last %}The white-box attacker needed <b>{{ p.edits|length }} edit{{ p.edits|length|pluralize }}</b> ({{ p.edits|join:", " }}) against {{ p.against }}{% if p.evaded %}, after which the GNN flagged none of the group{% else %}, and still could not hide every transaction{% endif %}.{% endif %}{% endfor %}
+  On the test period the agent escalated {{ adv.native_frauds.escalated }} of the file's {{ adv.native_frauds.n }} original frauds, raised {{ adv.false_alarms }} false alarms, and lowered its threshold in {{ adv_lowered_pct|floatformat:0 }}% of windows.</p>
+  <p class="small muted" style="margin:.5rem 0 0">The attack labels (<code>adversarial_group</code>, <code>adversarial_attack</code>, <code>adversarial_period</code>) are ground truth for this check only; no model reads them. <a href="{% url 'automation_file' run.pk %}">Download the attacked file</a> · <a href="{% url 'automation_decisions' run.pk %}?decision=adversarial">Decisions on adversarial transactions (CSV)</a></p>
+</section>
+
+<div class="table-wrap"><table>
+  <thead><tr><th>Group</th><th>What the attacker changed</th><th class="n">Fraud tx</th><th class="n">Rand per tx</th><th class="n">GNN alone</th><th class="n">Agent escalated</th><th class="n">Held back</th><th class="n">Approved</th><th class="n">Rand not escalated</th></tr></thead>
+  <tbody>{% for g in adv_groups %}
+    <tr{% if g.group == "C0" %} class="sub"{% endif %}><td><b>{{ g.group }}</b> {{ g.label }}</td>
+      <td class="small">{% if g.group == "C0" %}nothing: night, new device, abroad, large amounts{% elif g.group == "A1" %}everything: own device, home country, usual hours, normal amounts, known merchants, one a day{% elif g.group == "A2" %}small amounts, usual hours, home country, one a day{% elif g.group == "A3" %}routed through the busiest legitimate device and merchant{% else %}{% for p in adv_paths %}{% if forloop.last %}{{ p.edits|join:", " }} (white-box){% endif %}{% endfor %}{% endif %}</td>
+      <td class="n">{{ g.transactions }}</td><td class="n">{{ g.value_per_tx|money }}</td>
+      <td class="n">{{ g.gnn_pct|floatformat:0 }}%</td>
+      <td class="n"><b>{{ g.agent_pct|floatformat:0 }}%</b> <span class="muted small">({{ g.escalated }})</span></td>
+      <td class="n">{{ g.held_back }}</td><td class="n">{{ g.approved }}</td><td class="n">{{ g.value_through|money }}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+<p class="small muted">"GNN alone" is the share the base GNN flags at its fixed threshold; "agent escalated" is what the RL agent did. C0 is the control: the same kind of fraud with no attempt to evade. <a href="{% url 'automation_decisions' run.pk %}?decision=A4">A4 decisions (CSV)</a></p>
+{% if adv_train_groups %}<p class="small muted">Training-period attack transactions the defender learnt from: {% for g in adv_train_groups %}{{ g.group }} {{ g.transactions }}{% if not forloop.last %}, {% endif %}{% endfor %} (only 20% of their labels revealed). Graph camouflage in training used a different hub device and merchant from the test.</p>{% endif %}
+
+{% if adv_paths %}
+<h3>How the white-box attack evaded the GNN</h3>
+<p class="small muted">Group A4 starts as the naive fraud. At each step the attacker tries every remaining edit on the GNN and keeps the one that lowers the share flagged most, until none is flagged or nothing helps.</p>
+<div class="grid-2">
+  {% for p in adv_paths %}
+  <section class="panel">
+    <h4 style="margin-top:0">Against {{ p.against }}</h4>
+    <ol class="attack-path">
+      {% for st in p.steps %}<li><span class="ap-label">{{ st.label }}</span><span class="ap-bar"><i style="width:{{ st.pct|floatformat:0 }}%"></i></span><b>{{ st.pct|floatformat:0 }}%</b> flagged
+        {% if st.trials %}<div class="small muted">tried: {% for t in st.trials %}{{ t.label }} {{ t.pct|floatformat:0 }}%{% if not forloop.last %} · {% endif %}{% endfor %}</div>{% endif %}</li>{% endfor %}
+    </ol>
+  </section>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
+{% if known_scored or known_learn %}
+<h2 id="known-rings">Planted fraud rings: did the agent find them?</h2>
+<section class="panel verdict">
+  <p style="margin:0">The file carries {{ known_count }} planted rings with known members. The agent met {{ known_scored|length }} of them in the test period: of their {{ known_total }} fraudulent transactions it escalated <b>{{ known_escalated }}</b> and grouped <b>{{ known_grouped }}</b> into ring cases.{% for r in known_scored %} {{ r.ring }} ({{ r.pattern_label|lower }}): <b>{{ r.outcome }}</b>, {{ r.in_ring_case }} of {{ r.transactions }} in a ring case.{% endfor %}</p>
+  <p class="small muted" style="margin:.5rem 0 0">The ring labels (<code>fraud_ring_id</code>, <code>fraud_pattern</code>) are ground truth for this check only; no model reads them. <a href="{% url 'automation_file' run.pk %}">Download the file with the rings</a> · <a href="{% url 'automation_decisions' run.pk %}?decision=known_ring">Decisions on planted ring transactions (CSV)</a></p>
+</section>
+
+<div class="grid-2 ring-tables">
+  <section>
+    <h3 style="margin-top:0">Rings before the test period</h3>
+    <p class="small muted">What the GNN and the agent could learn from. "Revealed" counts the labels they were given.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Ring</th><th>Pattern</th><th>Period</th><th class="n">Fraud tx</th><th class="n">Accounts</th><th class="n">Revealed</th></tr></thead>
+      <tbody>{% for r in known_learn %}
+        <tr><td><b>{{ r.ring }}</b></td><td class="small">{{ r.pattern_label }}</td><td class="small">{{ r.period }}</td><td class="n">{{ r.transactions }}</td><td class="n">{{ r.accounts }}</td><td class="n">{{ r.revealed_labels }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+  <section>
+    <h3 style="margin-top:0">Rings in the test period</h3>
+    <p class="small muted">What the agent did with each fraudulent ring transaction.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Ring</th><th class="n">Fraud tx</th><th class="n">GNN alone</th><th class="n">Escalated</th><th class="n">In a ring case</th><th class="n">Held back</th><th class="n">Approved</th></tr></thead>
+      <tbody>{% for r in known_scored %}
+        <tr><td><b>{{ r.ring }}</b><div class="small muted">{{ r.pattern_label }}</div></td><td class="n">{{ r.transactions }}</td><td class="n">{{ r.gnn_alone }}</td><td class="n">{{ r.escalated }}</td>
+          <td class="n"><b>{{ r.in_ring_case }}</b></td><td class="n">{{ r.held_back }}</td><td class="n">{{ r.approved }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </section>
+</div>
+<p class="small muted">"GNN alone" counts ring transactions the base GNN would have flagged at its fixed threshold; "escalated" is what the agent did after its threshold and graph-evidence choices. In the test period {% for r in known_scored %}{{ r.revealed_labels }} {{ r.ring }}{% if not forloop.last %} and {% endif %}{% endfor %} labels were revealed, {{ res.params.delay_windows|mul:res.params.window_hours|floatformat:0 }} hours late.</p>
+
+<div class="ring-nets">
+  {% for r in known_scored %}
+  <figure class="panel ring-net">
+    <figcaption><b>{{ r.ring }}</b> · {{ r.pattern_label }}
+      <div class="small"><b>{{ r.outcome|capfirst }}</b>: {{ r.in_ring_case }} of {{ r.transactions }} in a ring case, {{ r.accounts_in_ring_case }} of {{ r.accounts }} accounts.</div>
+      {% for c in r.cases %}<div class="small muted">Case {{ c.case }} ({{ c.type }}): {{ c.ring_members }} ring transaction{{ c.ring_members|pluralize }}, {{ c.other_frauds }} other fraud, {{ c.legit }} legitimate · <a href="{% url 'automation_decisions' run.pk %}?decision={{ r.ring }}">CSV</a></div>{% empty %}<div class="small muted">No ring case. <a href="{% url 'automation_decisions' run.pk %}?decision={{ r.ring }}">Its decisions (CSV)</a></div>{% endfor %}
+    </figcaption>
+    <svg viewBox="0 0 {{ r.network.w }} {{ r.network.h }}" role="img" aria-label="Accounts, devices, IP subnets and merchants of ring {{ r.ring }}">
+      {% for e in r.network.edges %}<line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" stroke="var(--line)" stroke-width="1.2"/>{% endfor %}
+      {% for n in r.network.nodes %}
+        {% if n.kind == "account" %}<circle cx="{{ n.x }}" cy="{{ n.y }}" r="7" fill="{{ n.colour }}" stroke="var(--ink)" stroke-width="1"><title>{{ n.id }}: {{ decision_labels|get:n.decision }}</title></circle>
+        {% elif n.kind == "merchant" %}<rect x="{{ n.x|add:-6 }}" y="{{ n.y|add:-6 }}" width="12" height="12" fill="{{ n.colour }}" transform="rotate(45 {{ n.x }} {{ n.y }})"><title>merchant {{ n.id }}</title></rect>
+        {% else %}<rect x="{{ n.x|add:-5 }}" y="{{ n.y|add:-5 }}" width="10" height="10" rx="1.5" fill="{{ n.colour }}"><title>{{ n.kind }} {{ n.id }}</title></rect>{% endif %}
+      {% endfor %}
+    </svg>
+  </figure>
+  {% endfor %}
+</div>
+<p class="legend small">
+  <span><i class="dot" style="background:var(--fraud)"></i>account: blocked, case opened</span>
+  <span><i class="dot" style="background:var(--orange)"></i>escalated alone</span>
+  <span><i class="dot" style="background:var(--gold)"></i>held back</span>
+  <span><i class="dot" style="background:var(--panel);border:1px solid var(--ink)"></i>approved</span>
+  <span><i class="sq" style="background:var(--g-device)"></i>device</span>
+  <span><i class="sq" style="background:var(--g-ip)"></i>IP subnet</span>
+  <span><i class="sq dia" style="background:var(--ink)"></i>merchant</span>
+</p>
+<p class="small muted">An account takes the strongest decision made on any of its ring transactions.</p>
+{% endif %}
+
+<h2>{% if known_scored %}All ring cases the agent opened{% else %}Fraud rings{% endif %}</h2>
+<p class="small muted">Escalated transactions grouped as they arrived. A ring spans two or more accounts, linked through a shared card, device or IP address, or a merchant several escalated accounts used within 72 hours (a common cash-out point). Fraud counts use the true labels, for evaluation. {{ a.case_stats.frauds_in_rings }} of the {{ a.case_stats.tx_in_rings }} ring transactions were fraud. <a href="{% url 'automation_decisions' run.pk %}?decision=ring">Ring transactions (CSV)</a></p>
+{% if rings %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Ring</th><th class="n">Transactions</th><th class="n">Accounts</th><th class="n">Actually fraud</th><th>When</th><th>Linked by</th><th>Merchants</th></tr></thead>
+  <tbody>{% for c in rings %}
+    <tr><td><b>{{ c.case }}</b></td><td class="n">{{ c.transactions }}</td><td class="n">{{ c.accounts }}</td>
+      <td class="n{% if c.frauds == c.transactions %} best{% endif %}">{{ c.frauds }} of {{ c.transactions }}</td>
+      <td class="small">{{ c.start|slice:":16" }}{% if c.hours %} · {{ c.hours }} h{% endif %}</td>
+      <td class="small">{{ c.links|join:", " }}</td><td class="small">{{ c.merchants|join:", " }}</td></tr>
+    <tr class="sub"><td></td><td colspan="6" class="small muted">Accounts: {{ c.account_list|join:", " }} · Transactions: {{ c.transaction_ids|join:", " }}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% else %}<p class="muted">No escalations linked across accounts.</p>{% endif %}
+
+{% if bursts %}
+<h3>Account-takeover bursts</h3>
+<p class="small muted">Cases on a single account: several escalations on the same card, device or account within 24 hours.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Case</th><th>Account</th><th class="n">Transactions</th><th class="n">Actually fraud</th><th>When</th><th class="n">Amount</th><th>Merchants</th></tr></thead>
+  <tbody>{% for c in bursts %}
+    <tr><td><b>{{ c.case }}</b></td><td class="small">{{ c.account_list.0 }}</td><td class="n">{{ c.transactions }}</td>
+      <td class="n{% if c.frauds == c.transactions %} best{% endif %}">{{ c.frauds }} of {{ c.transactions }}</td>
+      <td class="small">{{ c.start|slice:":16" }}{% if c.hours %} · {{ c.hours }} h{% endif %}</td><td class="n">{{ c.amount|money }}</td>
+      <td class="small">{{ c.merchants|join:", " }}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% endif %}
+
+{% if a.ring_linked %}
+<h3>Tied to a ring but not escalated</h3>
+<p class="small muted">{{ a.case_stats.ring_linked }} transactions share a device or IP address with a ring member, or its account within an hour, and fell below the agent's threshold; {{ a.case_stats.ring_linked_frauds }} of them were fraud. Worth a look when a ring is investigated. <a href="{% url 'automation_decisions' run.pk %}?decision=ring_linked">CSV</a></p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Transaction</th><th>Time</th><th>Account</th><th>Merchant</th><th class="n">Amount</th><th class="n">GNN probability</th><th>Ring</th><th>Link</th><th>Decision</th><th class="n">Fraud?</th></tr></thead>
+  <tbody>{% for r in a.ring_linked|slice:":40" %}
+    <tr><td class="small">{{ r.transaction_id }}</td><td class="small">{{ r.timestamp|slice:":16" }}</td><td class="small">{{ r.account }}</td><td class="small">{{ r.merchant_name }}</td>
+      <td class="n">{{ r.amount|money }}</td><td class="n">{{ r.gnn_prob|pct:1 }}</td><td>{{ r.ring_linked }}</td><td class="small">{{ r.ring_link }}</td>
+      <td class="small">{{ decision_labels|get:r.decision }}</td><td class="n">{% if r.is_fraud %}<b style="color:var(--fraud)">yes</b>{% else %}no{% endif %}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+{% endif %}
+
+<h2>Not escalated: what the agent held back, and why</h2>
+<p class="small muted">{{ a.held_back_stats.n }} suspicious transactions were not escalated; {{ a.held_back_stats.frauds }} were fraud. For {{ a.held_back_stats.gnn_alone }} of them the GNN alone would have alerted ({{ a.held_back_stats.gnn_alone_frauds }} fraud): the agent had raised the threshold for that window ({{ a.held_back_stats.by_threshold }}), or evidence from linked accounts, cards and devices lowered the score ({{ a.held_back_stats.by_evidence }}). <a href="{% url 'automation_decisions' run.pk %}?decision=held_back">CSV</a></p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Transaction</th><th>Time</th><th>Account</th><th>Merchant</th><th class="n">Amount</th><th class="n">GNN probability</th><th class="n">Score / threshold</th><th>Why it was held back</th><th class="n">Fraud?</th></tr></thead>
+  <tbody>{% for r in a.held_back|slice:":60" %}
+    <tr><td class="small">{{ r.transaction_id }}</td><td class="small">{{ r.timestamp|slice:":16" }}</td><td class="small">{{ r.account }}</td><td class="small">{{ r.merchant_name }}</td>
+      <td class="n">{{ r.amount|money }}</td><td class="n">{{ r.gnn_prob|pct:1 }}</td><td class="n">{{ r.decision_score|num:2 }} / {{ r.threshold|num:2 }}</td>
+      <td class="small">{{ r.reason }}{% if r.ring_linked %} · tied to ring {{ r.ring_linked }}{% endif %}</td>
+      <td class="n">{% if r.is_fraud %}<b style="color:var(--fraud)">yes</b>{% else %}no{% endif %}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+
+<h2>The agent's settings over the test period</h2>
+<div class="grid-2">
+  <section class="panel"><h3 style="margin-top:0">Threshold and graph-evidence weight</h3>{% include "detector/_rl_chart.html" with c=decisions_chart aria="Threshold offset and evidence weight chosen per window" %}</section>
+  <section class="panel"><h3 style="margin-top:0">Outcomes</h3>{% include "detector/_rl_chart.html" with c=outcomes_chart aria="Cumulative frauds escalated, false alarms and frauds not escalated" %}</section>
+</div>
+
+<h2>Does the agent help?</h2>
+<p class="small muted">The GNN with four decision policies on the same test period and the same revealed labels. Agent rows are the mean over {{ res.params.agent_seeds }} agents. Validation reward is what the selection used; test numbers use every true label.</p>
+<div class="table-wrap"><table>
+  <thead><tr><th>Base GNN</th><th>Policy</th><th class="n">Validation reward</th><th class="n">F1</th><th class="n">Precision</th><th class="n">Recall</th><th class="n">PR-AUC</th><th class="n">Caught / false alarms</th></tr></thead>
+  <tbody>{% for r in comp %}
+    <tr{% if r.first %} class="group-start"{% endif %}><td class="small">{% if r.first %}{{ r.base }}{% endif %}</td>
+      <td>{% if r.deployed %}<b>{{ r.policy }}</b>{% else %}{{ r.policy }}{% endif %}</td>
+      <td class="n">{% if r.val_reward is not None %}{{ r.val_reward|floatformat:2 }}{% else %}–{% endif %}</td>
+      <td class="n">{{ r.f1|num:3 }}{% if r.sd %}<div class="small muted">±{{ r.sd.f1|num:3 }}</div>{% endif %}</td>
+      <td class="n">{{ r.precision|num:3 }}</td><td class="n">{{ r.recall|num:3 }}</td><td class="n">{{ r.pr_auc|num:3 }}</td>
+      <td class="n">{{ r.tp|floatformat:"-1" }} / {{ r.fp|floatformat:"-1" }}</td></tr>
+  {% endfor %}</tbody>
+</table></div>
+<p class="note">The fixed threshold is the one with the best F1 on the revealed validation labels; the best fixed setting is the single agent action with the most validation reward, held for the whole test period. The deployed row is one run of the agent with the most validation reward; the agent rows above it average three agents.</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  const box = document.getElementById("training");
+  if (box) {
+    const bar = box.querySelector(".progress i"), msg = document.getElementById("progress-msg");
+    const tick = async () => {
+      const d = await (await fetch(box.dataset.statusUrl)).json();
+      bar.style.width = d.progress + "%";
+      msg.textContent = d.message || "Waiting to start";
+      if (!["queued", "running"].includes(d.status)) location.reload(); else setTimeout(tick, 2000);
+    };
+    setTimeout(tick, 1500);
+  }
+</script>
+{% endblock %}

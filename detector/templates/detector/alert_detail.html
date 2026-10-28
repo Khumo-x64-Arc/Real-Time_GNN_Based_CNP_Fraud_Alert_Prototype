@@ -1,0 +1,105 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}Why {{ a.transaction_id }} was flagged{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="small muted" style="margin:0"><a href="{% url 'alert_list' %}">Alerts</a> / {{ a.dataset.name }}</p>
+    <h1><span class="level {{ a.level }}">{{ a.get_level_display }}</span> · {{ a.amount|money }}</h1>
+    <ul class="facts">
+      <li><b>{{ a.transaction_id }}</b></li>
+      {% if a.merchant %}<li>{{ a.merchant }}{% if a.country %} · {{ a.country }}{% endif %}</li>{% endif %}
+      {% if a.account %}<li>Account <b>{{ a.account }}</b>{% if account_alerts %} · {{ account_alerts }} other alert{{ account_alerts|pluralize }} on this account{% endif %}</li>{% endif %}
+      {% if a.occurred_at %}<li>{{ a.occurred_at }}</li>{% endif %}
+      {% if a.customer_response %}<li><b style="color:{% if a.customer_response == 'not_mine' %}var(--red){% else %}var(--review){% endif %}">{{ a.get_customer_response_display }}</b> · {{ a.customer_responded_at|date:"j M, H:i" }}</li>{% endif %}
+      {% if a.actual_label == 1 %}<li class="truth hit">Labelled fraud in the dataset</li>{% elif a.actual_label == 0 %}<li>Labelled legitimate in the dataset</li>{% endif %}
+    </ul>
+  </div>
+  <form method="post" action="{% url 'alert_review' a.pk %}" class="actions">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}">
+    {% if a.review == "open" %}
+    <button class="btn" name="review" value="confirmed">Confirm fraud</button>
+    <button class="btn ghost" name="review" value="dismissed">False alarm</button>
+    {% else %}<span class="tag" style="font-size:.85rem;padding:.3rem .7rem">{{ a.get_review_display }}</span>
+    <button class="btn ghost small" name="review" value="open">Reopen</button>{% endif %}
+  </form>
+</div>
+
+{% if not has_ex %}
+<div class="panel empty">
+  <h3>No GNN explanation stored for this alert</h3>
+  <p>{% if legacy_ex %}It was raised by an earlier version of the app that averaged several models.{% else %}It was raised before explainability was added.{% endif %} Retrain the dataset and replay it in the live monitor to explain the GNN's decisions.</p>
+</div>
+{% else %}
+
+<section class="why">
+  <p class="why-summary">{{ ex.summary }}</p>
+  <div class="meters">
+    <div class="meter-row" style="--c: {{ meter.color }}">
+      <span class="model-name"><span class="swatch" style="background:{{ meter.color }}"></span>GNN score</span>
+      <span class="pmeter" role="img" aria-label="GNN {{ meter.p|pct:1 }}, threshold {{ meter.t|pct:1 }}"><i style="width: {{ meter.p|mul:100 }}%"></i><b style="left: {{ meter.t|mul:100 }}%"></b></span>
+      <span class="n"><b>{{ meter.p|pct:1 }}</b> <span class="small muted">{% if meter.flag %}&ge;{% else %}&lt;{% endif %} {{ meter.t|pct:1 }} threshold</span></span>
+    </div>
+  </div>
+</section>
+
+<h2>What drove the GNN's score</h2>
+<section class="panel attr">
+  <p class="small muted" style="margin-top:0">How far the GNN's log-odds of fraud fall when each of the transaction's own features is swapped for values from typical legitimate transactions. Its graph neighbourhood stays as it was.</p>
+  <div class="attr-head small muted" aria-hidden="true"><span>Feature</span><span>This transaction</span><span class="attr-axis"><span>towards legitimate</span><span>towards fraud</span></span><span></span></div>
+  {% for r in drivers %}
+  <div class="attr-row">
+    <span class="attr-label">{{ r.label }}</span>
+    <span class="attr-val"><b>{{ r.value }}</b>{% if r.typical %}<span class="small muted"> typical {{ r.typical }}</span>{% endif %}</span>
+    <span class="dbar" aria-hidden="true"><i class="{% if r.pos %}up{% else %}down{% endif %}" style="width: {{ r.w }}%"></i></span>
+    <span class="attr-num {% if r.pos %}up{% else %}down{% endif %}">{{ r.v|signed }}</span>
+  </div>
+  {% endfor %}
+  <p class="small muted" style="margin-bottom:0">Values are log-odds: +1 multiplies the odds of fraud by about 2.7, +2.3 by 10. Log-odds are used because the GNN is often near-certain, and a probability of 99.99% hardly moves however much evidence is removed. Features starting with V are anonymised PCA components from the original ULB dataset, so they can be ranked but not described.</p>
+</section>
+
+<div class="grid-2" style="margin-top:2rem">
+  <section>
+    <h3>Graph evidence (GNN)</h3>
+    <p class="small muted" style="margin-top:0">How much the GNN's log-odds change when it can't see each linked entity's history, and what it would score without that link. Red means the connection made the transaction look riskier.</p>
+    {% if graph %}
+    <div class="graph-list">
+      {% for e in graph %}
+      <div class="graph-item">
+        <div><b>{{ e.label }}</b> <code>{{ e.key|truncatechars:22 }}</code>
+          <div class="small muted">{{ e.past_tx }} earlier transaction{{ e.past_tx|pluralize }} linked{% if e.accounts %} · used by {{ e.accounts }} account{{ e.accounts|pluralize }}{% endif %}</div></div>
+        <div class="graph-eff {% if e.delta > 0.05 %}up{% elif e.delta < -0.05 %}down{% endif %}">
+          <span class="gbar"><i style="width: {{ e.w }}%"></i></span>
+          <span class="small">{% if e.delta > 0.05 %}{{ e.delta|signed }} log-odds · {{ e.p_without|pct:0 }} without it{% elif e.delta < -0.05 %}{{ e.delta|signed }} log-odds, reassuring{% else %}no effect{% endif %}</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<p class="muted small">The transaction has no linked entities in the graph.</p>{% endif %}
+  </section>
+  <section>
+    <h3>What would change the decision</h3>
+    {% if ex.counterfactual %}
+    <p class="small muted" style="margin-top:0">GNN score as the strongest drivers are swapped, one more at a time, for values from typical legitimate transactions.</p>
+    <ol class="cf">
+      <li><span>As scored</span><b>{{ ex.probabilities.GNN|pct:0 }}</b></li>
+      {% for s in cf_path %}<li class="{% if s.below %}below{% endif %}"><span>+ change {{ s.name }}</span><b>{{ s.p|pct:0 }}</b></li>{% endfor %}
+    </ol>
+    <p class="small">{% if ex.counterfactual.crosses %}The alert clears once the score drops under the {{ ex.counterfactual.threshold|pct:0 }} threshold.{% else %}Even after changing the top {{ ex.counterfactual.changed|length }} drivers the score stays above the {{ ex.counterfactual.threshold|pct:0 }} threshold, so the risk is spread across many features.{% endif %}</p>
+    {% else %}<p class="muted small">No single feature pushed this transaction towards fraud; the alert came from behavioural rules.</p>{% endif %}
+  </section>
+</div>
+
+<h3 style="margin-top:2rem">Behavioural signals</h3>
+{% if a.signals %}<ul class="reasons" style="font-size:.95rem">{% for s in a.signals %}<li>{{ s.text }}</li>{% endfor %}</ul>
+{% else %}<p class="muted small">No behavioural rule fired; the alert came from the GNN's score.</p>{% endif %}
+
+<details style="margin-top:2rem">
+  <summary><b>How these explanations are calculated</b></summary>
+  <div class="small" style="max-width:75ch">
+    <p><b>Feature attribution.</b> Each of the transaction's own features is swapped for its value in 12 typical legitimate training transactions, the GNN rescores it against the same graph neighbourhood, and the fall in log-odds is averaged. One-hot columns such as country are swapped as a whole. When features overlap (the behavioural risk score summarises the other behavioural flags, for example), they share the credit, so read them together.</p>
+    <p><b>Graph evidence.</b> The GNN rescores the transaction with one entity hidden at a time, so it can't use that account's, device's or IP's history.</p>
+    <p><b>Counterfactual.</b> Drivers are swapped cumulatively in order of importance until the GNN score falls below its alert threshold. This shows what the decision hinged on; it isn't a claim about what a real legitimate transaction would look like.</p>
+  </div>
+</details>
+{% endif %}
+{% endblock %}
+{% block scripts %}{% endblock %}

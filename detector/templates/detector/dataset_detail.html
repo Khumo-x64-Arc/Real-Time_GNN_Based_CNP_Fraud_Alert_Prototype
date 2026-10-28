@@ -1,0 +1,192 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}{{ ds.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="small muted" style="margin:0"><a href="{% url 'dataset_list' %}">Datasets</a> / {{ ds.file.name|cut:"datasets/" }}</p>
+    <h1>{{ ds.name }}</h1>
+    {% if ds.status == "ready" %}
+    <ul class="facts">
+      <li><b>{{ res.rows|floatformat:"0g" }}</b> transactions</li>
+      <li><b>{{ res.frauds|floatformat:"0g" }}</b> fraudulent ({{ res.fraud_rate|pct:2 }})</li>
+      <li><b>{{ res.n_features }}</b> features</li>
+      <li>Trained {{ ds.trained_at|date:"j M Y, H:i" }}</li>
+    </ul>
+    {% endif %}
+  </div>
+  <div class="actions">
+    {% if ds.is_live_ready %}<a class="btn" href="{% url 'monitor_dataset' ds.pk %}">Open live monitor</a>{% endif %}
+    {% if ds.status != "training" and ds.status != "unusable" %}
+    <form method="post" action="{% url 'dataset_retrain' ds.pk %}">{% csrf_token %}<button class="btn ghost">Retrain</button></form>
+    {% endif %}
+    <form method="post" action="{% url 'dataset_delete' ds.pk %}" onsubmit="return confirm('Delete {{ ds.name|escapejs }}, its GNN, results and alerts?')">{% csrf_token %}<button class="btn danger">Delete</button></form>
+  </div>
+</div>
+
+{% if ds.status == "queued" or ds.status == "training" %}
+<section class="panel" id="training" data-status-url="{% url 'dataset_status' ds.pk %}">
+  <h2 style="margin-top:0">Training and testing the GNN</h2>
+  <p class="muted" id="progress-msg">{{ ds.progress_message|default:"Waiting to start" }}</p>
+  <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ ds.progress }}"><i style="width: {{ ds.progress }}%"></i></div>
+  <p class="small muted">Under a minute for 20,000 rows. This page updates by itself.</p>
+</section>
+
+{% elif ds.status == "unusable" or ds.status == "failed" %}
+<section class="panel" style="border-left:4px solid var(--fraud)">
+  <h2 style="margin-top:0">{% if ds.status == "unusable" %}This file can't be trained on{% else %}Training stopped with an error{% endif %}</h2>
+  <p>{{ ds.error }}</p>
+  {% if ds.columns %}<p class="small muted">Columns found: {% for c in ds.columns|slice:":40" %}<code>{{ c }}</code>{% if not forloop.last %} {% endif %}{% endfor %}{% if ds.columns|length > 40 %} and {{ ds.columns|length|add:"-40" }} more{% endif %}</p>{% endif %}
+  <div class="actions"><a class="btn" href="{% url 'upload' %}">Upload a different file</a></div>
+</section>
+
+{% else %}
+{% if legacy %}
+<section class="panel" style="border-left:4px solid var(--orange);margin-bottom:1.5rem">
+  <h2 style="margin-top:0">Retrain to run the GNN tests</h2>
+  <p>This dataset was trained by an earlier version that compared several models. Only its GNN results are shown below. Retrain it to get the live (streaming) test, the graph ablation, the threshold sweep and live monitoring.</p>
+  <form method="post" action="{% url 'dataset_retrain' ds.pk %}">{% csrf_token %}<button class="btn">Retrain the GNN</button></form>
+</section>
+{% endif %}
+<h2 style="margin-top:.5rem">GNN test results</h2>
+<p class="muted small">Scored on the last {{ res.sizes.test|floatformat:"0g" }} transactions ({{ res.test_frauds }} frauds), which the GNN never saw labels for.
+{% if res.split == "time" %}Split by time: first 60% trains, next 15% tunes the alert threshold, last 25% tests.{% else %}Stratified random split (60 / 15 / 25) because the time-ordered test period had too few frauds.{% endif %}</p>
+{% with fs=res.fsmote %}{% if fs.synthetic %}<p class="muted small">Class imbalance: <b>FSMOTE</b> added {{ fs.synthetic|floatformat:"0g" }} synthetic fraud nodes to the {{ fs.minority_before|floatformat:"0g" }} real training frauds (1 : {{ fs.imbalance_before|floatformat:0 }} became {% if fs.imbalance_after <= 1.01 %}balanced{% else %}1 : {{ fs.imbalance_after|floatformat:1 }}{% endif %}). Validation and test data are real only. <a href="{% url 'results' %}?dataset={{ ds.pk }}#txgraph">See the transaction graph</a>.</p>{% endif %}{% endwith %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Evaluation</th>{% for k, label in metrics %}<th class="n">{{ label }}</th>{% endfor %}<th class="n">Threshold</th><th class="n">Time</th></tr></thead>
+    <tbody>
+    {% for row in rows %}
+      <tr>
+        <td><span class="model-name"><span class="swatch" style="background:{{ row.color }}"></span>{{ row.label }}</span></td>
+        {% for c in row.cells %}<td class="n">{{ c.v|num:4 }}</td>{% endfor %}
+        <td class="n">{{ row.r.threshold|num:3 }}</td>
+        <td class="n">{{ row.r.train_seconds }}s</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="note"><b>Full graph</b>: the whole file is one graph, so each test transaction also sees later transactions on its account, device or IP (their features, never their labels). <b>Live (streaming)</b>: transactions arrive one at a time and each sees only what came before it, exactly as the live monitor and the scoring API score; the monitor alerts at this threshold. {% if res.split != "time" %}The live test needs a time-ordered split, so it was skipped. {% endif %}Time is training time for the full graph and streaming time for the live test. With {{ res.fraud_rate|pct:2 }} fraud, a model that never flags anything already scores {{ null_accuracy|pct:2 }} accuracy, so judge on PR-AUC, F1, precision and recall.</p>
+
+<div class="grid-2" style="margin-top:2rem">
+  <section class="panel roc">
+    <h3>ROC curves</h3>
+    <p class="small muted" style="margin-top:0">False-positive rate on a log scale; fraud detection happens below 1%.</p>
+    <svg viewBox="0 0 {{ roc.w }} {{ roc.h }}" role="img" aria-label="ROC curves for the GNN">
+      {% for t in roc.yticks %}<line class="grid" x1="{{ roc.x0 }}" x2="{{ roc.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ roc.x0|add:'-6' }}" y="{{ t.y }}" dy="4" text-anchor="end">{{ t.label }}</text>{% endfor %}
+      {% for t in roc.xticks %}<line class="grid" x1="{{ t.x }}" x2="{{ t.x }}" y1="{{ roc.y0 }}" y2="{{ roc.y1 }}"/><text x="{{ t.x }}" y="{{ roc.y1|add:'16' }}" text-anchor="middle">{{ t.label }}</text>{% endfor %}
+      <line class="axis" x1="{{ roc.x0 }}" x2="{{ roc.x1 }}" y1="{{ roc.y1 }}" y2="{{ roc.y1 }}"/>
+      <line class="axis" x1="{{ roc.x0 }}" x2="{{ roc.x0 }}" y1="{{ roc.y0 }}" y2="{{ roc.y1 }}"/>
+      <text x="{{ roc.x1 }}" y="{{ roc.xlabel_y }}" text-anchor="end">False-positive rate</text>
+      <text x="12" y="{{ roc.y0 }}" transform="rotate(-90 12 {{ roc.y0 }})" text-anchor="end" dy="4">True-positive rate</text>
+      {% for s in roc.series %}<polyline class="curve" data-model="{{ s.name }}" points="{{ s.points }}" stroke="{{ s.color }}"/>{% endfor %}
+    </svg>
+    <ul class="legend">
+      {% for s in roc.series %}<li><button type="button" aria-pressed="true" data-toggle="{{ s.name }}"><span class="swatch" style="background:{{ s.color }}"></span>{{ s.label }} · {{ s.auc|num:4 }}</button></li>{% endfor %}
+    </ul>
+  </section>
+  <section class="panel">
+    <h3>What the GNN relies on: graph ablation</h3>
+    {% if ablation %}
+    <p class="small muted" style="margin-top:0">The test set rescored on the full graph with one kind of link removed, using the same trained weights. A red bar is PR-AUC the GNN loses without those links.</p>
+    <div class="abl">
+      {% for r in ablation %}
+      <div class="abl-row{% if not r.type %} base{% endif %}">
+        <span class="abl-label">{{ r.label }}</span>
+        <span class="abl-v"><b>{{ r.pr_auc|num:3 }}</b>{% if r.type %} <span class="small {% if r.d_pr_auc < 0 %}loss{% else %}muted{% endif %}">{{ r.d_pr_auc|signed }}</span>{% endif %}</span>
+        <span class="dbar abl-bar" aria-hidden="true">{% if r.type %}<i class="{% if r.pos %}up{% else %}down{% endif %}" style="width: {{ r.w }}%"></i>{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="small muted" style="margin-bottom:0">PR-AUC on the test set. At the full-graph threshold, "every link removed" catches {{ ablation|last|get:"tp" }} of {{ res.test_frauds }} frauds against {{ ablation.0.tp }} with the full graph.</p>
+    {% else %}<p class="small muted">Retrain this dataset to run the graph ablation.</p>{% endif %}
+  </section>
+</div>
+
+<h2>Confusion matrices</h2>
+<p class="muted small">At the alert threshold. Gold cells are correct decisions, red cells are mistakes.</p>
+<div class="cms">
+  {% for row in rows %}
+  <article class="cm" style="--c: {{ row.color }}">
+    <h3>{{ row.label }}</h3>
+    <div class="cm-grid">
+      <span></span><span class="h">Flagged fraud</span><span class="h">Let through</span>
+      <span class="rh">Fraud</span>
+      <div class="cell good" style="--a: {{ row.cm.tp }}"><span class="v">{{ row.r.tp|floatformat:"0g" }}</span><span class="k">True positives</span></div>
+      <div class="cell bad" style="--a: {{ row.cm.fn }}"><span class="v">{{ row.r.fn|floatformat:"0g" }}</span><span class="k">False negatives</span></div>
+      <span class="rh">Legit</span>
+      <div class="cell bad" style="--a: {{ row.cm.fp }}"><span class="v">{{ row.r.fp|floatformat:"0g" }}</span><span class="k">False positives</span></div>
+      <div class="cell good" style="--a: {{ row.cm.tn }}"><span class="v">{{ row.r.tn|floatformat:"0g" }}</span><span class="k">True negatives</span></div>
+    </div>
+    <p>Caught {{ row.r.tp }} of {{ row.r.tp|add:row.r.fn }} frauds ({{ row.caught|pct:1 }}). {{ row.r.fp }} false alarm{{ row.r.fp|pluralize }} among {{ row.r.tn|add:row.r.fp|floatformat:"0g" }} legitimate transactions ({{ row.fpr|pct:2 }}).</p>
+  </article>
+  {% endfor %}
+</div>
+
+{% if sweep %}
+<h2>Threshold sweep</h2>
+<p class="muted small">{{ sweep_label }} on the test set at a range of alert thresholds, for picking an operating point. The highlighted row is the threshold chosen on validation data (best F1), which {% if res.split == "time" %}the live monitor uses{% else %}is used for alerts{% endif %}.</p>
+<div class="table-wrap">
+  <table class="sweep">
+    <thead><tr><th class="n">Threshold</th><th class="n">Alerts</th><th class="n">Alert rate</th><th class="n">Frauds caught</th><th class="n">False alarms</th><th class="n">Precision</th><th class="n">Recall</th><th class="n">F1</th></tr></thead>
+    <tbody>
+    {% for s in sweep %}
+      <tr{% if s.chosen %} class="chosen"{% endif %}>
+        <td class="n">{{ s.threshold|num:3 }}{% if s.chosen %} <span class="tag">Chosen</span>{% endif %}</td>
+        <td class="n">{{ s.flagged|floatformat:"0g" }}</td><td class="n">{{ s.alert_rate|pct:2 }}</td>
+        <td class="n">{{ s.tp }} of {{ res.test_frauds }}</td><td class="n">{{ s.fp|floatformat:"0g" }}</td>
+        <td class="n">{{ s.precision|num:3 }}</td><td class="n">{{ s.recall|num:3 }}</td><td class="n">{{ s.f1|num:3 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<h2>Behavioural signals</h2>
+<p class="muted small">How often each signal fired on the test transactions and how much more likely fraud was when it did. The GNN reads these as node features; they are also the reasons shown on alerts.</p>
+{% if res.signals %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Signal</th><th class="n">Times fired</th><th class="n">Fraud rate when fired</th><th class="n">Lift over base rate</th><th class="n">Frauds with this signal</th></tr></thead>
+    <tbody>
+    {% for s in res.signals %}
+      <tr><td>{{ s.label }}</td><td class="n">{{ s.count|floatformat:"0g" }}</td><td class="n">{{ s.fraud_rate|pct:1 }}</td><td class="n">{{ s.lift|floatformat:1 }}×</td><td class="n">{{ s.frauds_caught }} of {{ res.test_frauds }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}<p class="muted">No behavioural signals fired. The file has no account, device, IP or country columns to profile.</p>{% endif %}
+
+<details style="margin-top:2rem">
+  <summary><b>Columns the app recognised</b></summary>
+  <div class="table-wrap" style="margin-top:.8rem"><table><tbody>
+    {% for role, col in res.schema.items %}<tr><td>{{ role|capfirst }}</td><td><code>{{ col }}</code></td></tr>{% endfor %}
+    <tr><td>Graph entities (GNN links)</td><td>{{ res.graph_entities|join:", " }}</td></tr>
+    {% if res.gnn %}<tr><td>GNN training</td><td>Two-layer GraphSAGE-style, {{ res.gnn.hidden }} hidden units · stopped at epoch {{ res.gnn.epochs_run }}, kept epoch {{ res.gnn.best_epoch }} (validation PR-AUC {{ res.gnn.best_val_ap|num:3 }}) · {{ res.gnn.train_seconds }}s</td></tr>{% endif %}
+  </tbody></table></div>
+  {% if res.sampled_note %}<p class="note">{{ res.sampled_note }}</p>{% endif %}
+</details>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  const box = document.getElementById("training");
+  if (box) {
+    const bar = box.querySelector(".progress i"), msg = document.getElementById("progress-msg");
+    const tick = async () => {
+      const d = await (await fetch(box.dataset.statusUrl)).json();
+      bar.style.width = d.progress + "%";
+      box.querySelector(".progress").setAttribute("aria-valuenow", d.progress);
+      msg.textContent = d.message || "Waiting to start";
+      if (!["queued", "training"].includes(d.status)) location.reload(); else setTimeout(tick, 1500);
+    };
+    setTimeout(tick, 1000);
+  }
+  document.querySelectorAll("[data-toggle]").forEach(b => b.addEventListener("click", () => {
+    const on = b.getAttribute("aria-pressed") !== "true";
+    b.setAttribute("aria-pressed", on);
+    document.querySelector(`polyline[data-model="${b.dataset.toggle}"]`).style.display = on ? "" : "none";
+  }));
+</script>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "detector/customer/base.html" %}{% load static %}
+{% block title %}My transactions{% endblock %}
+{% block header_right %}
+<form method="post" action="{% url 'customer_logout' %}" class="who">{% csrf_token %}
+  <span class="small"><b>{{ prof.display_name|default:prof.user.username }}</b> <span class="muted">· {{ prof.masked_account }}</span></span>
+  <button class="linklike small">{% if login_off %}Switch customer{% else %}Sign out{% endif %}</button>
+</form>
+{% endblock %}
+{% block content %}
+<div id="cust" data-feed-url="{% url 'customer_feed' %}" data-respond-url="/my/alerts/0/respond/" data-csrf="{{ csrf_token }}" data-last-id="{{ last_id }}">
+  <div class="cust-hello">
+    <h1>Hi {{ prof.display_name|default:prof.user.username }}</h1>
+    <p class="live"><span class="live-dot" aria-hidden="true"></span> Watching account {{ prof.masked_account }} live · <span id="stat-line">{{ n_monitored }} checked, {{ n_flagged }} flagged</span></p>
+  </div>
+
+  <section class="cust-status" id="status" aria-live="polite"></section>
+
+  <section id="attention-wrap" hidden>
+    <h2>Needs your attention</h2>
+    <div id="attention" class="attn-list"></div>
+  </section>
+
+  <h2>Recent activity</h2>
+  <div class="activity" id="activity" aria-live="off"></div>
+  <p class="small muted" id="empty-note" hidden>No transactions yet. New card activity will appear here the moment it happens.</p>
+
+  <details class="panel cust-settings">
+    <summary><b>Alert settings</b></summary>
+    <form method="post" action="{% url 'customer_settings' %}" class="stack" style="margin-top:1rem">{% csrf_token %}
+      <label class="check"><input type="checkbox" name="email_alerts" {% if prof.email_alerts %}checked{% endif %}> Email me when a transaction is flagged</label>
+      <div><label for="email">Email address</label><input type="text" inputmode="email" id="email" name="email" value="{{ prof.user.email }}" autocomplete="email"></div>
+      <div class="actions"><button class="btn" type="submit">Save settings</button>
+      <button class="btn ghost" type="button" id="notify-btn" hidden>Turn on browser alerts</button></div>
+    </form>
+  </details>
+</div>
+{{ initial|json_script:"initial" }}
+{% endblock %}
+{% block scripts %}<script src="{% static 'detector/customer.js' %}"></script>{% endblock %}

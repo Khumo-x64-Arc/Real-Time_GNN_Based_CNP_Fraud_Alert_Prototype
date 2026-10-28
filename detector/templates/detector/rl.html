@@ -1,0 +1,63 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}RL agent{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>RL agent</h1>
+    <p class="muted">A Deep Q-Network on top of the semi-supervised GNN, after FraudGNN-RL (Cui et al., 2025) and DRL+GNN (Almasan et al., 2022). Only a fraction of transactions ever get a label, and late. The GNN learns from those plus pseudo-labels, and the agent decides the alert threshold, how much to trust labels propagated through the graph, and when to pseudo-label, one time window at a time.</p>
+  </div>
+</div>
+
+<div class="grid-2">
+  <section class="panel">
+    <h2 style="margin-top:0">Start a run</h2>
+    <form method="post" enctype="multipart/form-data" class="stack tr-form">{% csrf_token %}
+      {% if form.non_field_errors %}<div class="flash error">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+      <div><label for="{{ form.kind.id_for_label }}">{{ form.kind.label }}</label>{{ form.kind }}</div>
+      <div><label for="{{ form.file.id_for_label }}">{{ form.file.label }}</label>{{ form.file }}
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.file.help_text }}</p></div>
+      <div><label for="{{ form.source.id_for_label }}">{{ form.source.label }}</label>{{ form.source }}{% for e in form.source.errors %}<div class="small" style="color:var(--fraud)">{{ e }}</div>{% endfor %}
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.source.help_text }}</p></div>
+      <div><label for="{{ form.label_rate.id_for_label }}">{{ form.label_rate.label }}</label>{{ form.label_rate }}
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.label_rate.help_text }}</p></div>
+      <div><label for="{{ form.episodes.id_for_label }}">{{ form.episodes.label }}</label>{{ form.episodes }}
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.episodes.help_text }}</p></div>
+      <div><label for="{{ form.max_rows.id_for_label }}">{{ form.max_rows.label }}</label>{{ form.max_rows }}
+        <p class="small muted" style="margin:.25rem 0 0">{{ form.max_rows.help_text }}</p></div>
+      <div><label for="{{ form.name.id_for_label }}">Name (optional)</label>{{ form.name }}</div>
+      <button class="btn" type="submit">Start</button>
+    </form>
+    
+  </section>
+  <section class="panel">
+    <h2 style="margin-top:0">How it works</h2>
+    <ol class="small tr-steps">
+      <li><b>Graph.</b> European Cardholder: each transaction links to up to 5 earlier transactions from the past hour with cosine similarity above 0.9 (FraudGNN-RL's construction). IEEE-CIS: links through account, card and device.</li>
+      <li><b>Semi-supervised GNN.</b> Trained on the revealed labels only. Then self-training: unlabelled training transactions the GNN is surest about become half-weight pseudo-labels for another round. The round with the best labelled-validation PR-AUC is kept.</li>
+      <li><b>The agent's world.</b> The validation and test periods are cut into time windows. In each one the agent sees a readout of the GNN's embeddings plus feedback so far, and picks a threshold, a label-propagation weight and a pseudo-labelling confidence (63 actions).</li>
+      <li><b>Reward.</b> Caught minus missed frauds minus 0.2 per false alarm, counted on labelled transactions only. Labels arrive a few windows late.</li>
+      <li><b>Comparison.</b> On the test stream, against a fixed threshold, the best single fixed setting, and the agent without the graph.</li>
+    </ol>
+  </section>
+</div>
+
+<h2>Runs</h2>
+{% if runs %}
+<div class="table-wrap"><table>
+  <thead><tr><th>Run</th><th>Status</th><th class="n">Labels</th><th class="n">Agent F1</th><th class="n">Fixed-threshold F1</th><th class="n">Agent PR-AUC</th><th>Started</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td><a href="{{ r.get_absolute_url }}">{{ r.name }}</a><div class="small muted">{{ r.get_kind_display }}</div></td>
+      <td><span class="status {% if r.status == 'running' %}training{% else %}{{ r.status }}{% endif %}">{{ r.get_status_display }}</span>{% if r.status == "running" or r.status == "queued" %} <span class="small muted">{{ r.progress }}%</span>{% endif %}</td>
+      <td class="n">{{ r.params.label_rate|pct:0 }}</td>
+      <td class="n">{{ r.results.policies.agent.f1|num:3 }}</td>
+      <td class="n">{{ r.results.policies.fixed.f1|num:3 }}</td>
+      <td class="n">{{ r.results.policies.agent.pr_auc|num:4 }}</td>
+      <td class="small muted">{{ r.created_at|date:"j M Y, H:i" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}<p class="muted">No runs yet.</p>{% endif %}
+{% endblock %}

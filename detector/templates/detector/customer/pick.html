@@ -1,0 +1,28 @@
+{% extends "detector/customer/base.html" %}
+{% block title %}Choose a customer{% endblock %}
+{% block content %}
+<section class="auth-card inline">
+  <h1>Choose a customer</h1>
+  <p class="muted">Customer sign-in is switched off (<code>CUSTOMER_LOGIN_REQUIRED=0</code>), so you can open any enrolled customer's dashboard. Use this for demos on your own machine only.</p>
+  {% if profiles %}
+  <form method="post" class="stack">{% csrf_token %}
+    <div class="table-wrap"><table>
+      <thead><tr><th></th><th>Customer</th><th>Account</th><th>Dataset</th></tr></thead>
+      <tbody>
+      {% for p in profiles %}
+        <tr>
+          <td><input type="radio" name="profile" value="{{ p.pk }}" id="p{{ p.pk }}" {% if forloop.first %}checked{% endif %}></td>
+          <td><label for="p{{ p.pk }}" style="margin:0;font-weight:600">{{ p.display_name|default:p.user.username }}</label></td>
+          <td><code>{{ p.account_id }}</code></td>
+          <td class="small muted">{{ p.dataset.name }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <button class="btn" type="submit">Open dashboard</button>
+  </form>
+  {% else %}
+  <p>No customers are enrolled yet. Enrol one on the analyst <b>Customers</b> page, or <a href="{% url 'customer_signup' %}">enrol an account here</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

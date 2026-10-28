@@ -1,0 +1,50 @@
+{% extends "detector/base.html" %}
+{% block title %}Upload{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Upload a dataset</h1>
+<p class="muted">Training starts as soon as the file is in. Every upload gets its own results page and live monitor.</p></div></div>
+<div class="upload-grid">
+  <form method="post" enctype="multipart/form-data" id="upload-form">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <label class="drop" id="drop" for="{{ form.file.id_for_label }}">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+      <span class="file-name" id="file-name">Drop a CSV here or choose a file</span>
+      <span class="small muted">Up to a few hundred MB. Every row is used for training; the fraud class is oversampled with FSMOTE.</span>
+      {{ form.file }}
+    </label>
+    {{ form.file.errors }}
+    <div style="margin-top:1.2rem">
+      <label for="{{ form.name.id_for_label }}">{{ form.name.label }}</label>
+      {{ form.name }}
+      <div class="helptext">{{ form.name.help_text }}</div>
+    </div>
+    <div class="actions" style="margin-top:1.5rem">
+      <button class="btn" type="submit" id="upload-btn">Upload and train</button>
+    </div>
+  </form>
+  <div>
+    <h3>What the file needs</h3>
+    <ul class="req">
+      <li>One row per transaction, with a <b>0/1 fraud label</b> column named <code>Class</code>, <code>isFraud</code> or <code>is_fraud</code>.</li>
+      <li>Transaction features, such as <code>Amount</code>, <code>V1…V28</code>, merchant category or channel.</li>
+      <li>For behavioural signals and the graph model: a timestamp and IDs for account, device, IP address and merchant. Common names like <code>account_id</code>, <code>device_id</code>, <code>ip_address</code> and <code>merchant_id</code> are picked up automatically.</li>
+      <li>At least 20 fraudulent rows so the test set is meaningful.</li>
+    </ul>
+    <p class="small muted">Files without labels (for example a Kaggle <code>sample_submission.csv</code>) can't be trained or scored, because there is nothing to learn from or compare against.</p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const drop = document.getElementById("drop"), input = drop.querySelector("input[type=file]"), nameEl = document.getElementById("file-name");
+  const show = () => { if (input.files.length) nameEl.textContent = input.files[0].name + " · " + (input.files[0].size / 1048576).toFixed(1) + " MB"; };
+  input.addEventListener("change", show);
+  ["dragenter", "dragover"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", ev => { input.files = ev.dataTransfer.files; show(); });
+  document.getElementById("upload-form").addEventListener("submit", () => {
+    const b = document.getElementById("upload-btn"); b.disabled = true; b.textContent = "Uploading…";
+  });
+</script>
+{% endblock %}

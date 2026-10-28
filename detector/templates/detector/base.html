@@ -1,0 +1,47 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Dashboard{% endblock %} · Khumo Detection Fraud Systems</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'detector/app.css' %}">
+  <link rel="icon" type="image/png" href="{% static 'detector/img/favicon.png' %}">
+</head>
+<body data-alerts-url="{% url 'api_latest_alerts' %}" data-alert-list-url="{% url 'alert_list' %}">
+  <header class="top">
+    <a class="brand" href="{% url 'dataset_list' %}">
+      <img class="brand-full" src="{% static 'detector/img/logo-480.png' %}" alt="Khumo Detection Fraud Systems" width="180" height="62">
+      <img class="brand-mark" src="{% static 'detector/img/emblem.png' %}" alt="Khumo Detection Fraud Systems" width="44" height="44">
+      <span class="brand-sub">Fraud</span>
+    </a>
+    {% with u=request.resolver_match.url_name %}
+    <nav class="nav" aria-label="Main">
+      <a href="{% url 'dataset_list' %}" {% if u == 'dataset_list' or u == 'dataset_detail' %}aria-current="page"{% endif %}>Datasets</a>
+      <a href="{% url 'upload' %}" {% if u == 'upload' %}aria-current="page"{% endif %}>Upload</a>
+      <a href="{% url 'results' %}" {% if u == 'results' %}aria-current="page"{% endif %}>Results</a>
+      <a href="{% url 'rl' %}" {% if u == 'rl' or u == 'rl_run' %}aria-current="page"{% endif %}>RL agent</a>
+      <a href="{% url 'automation' %}" {% if u == 'automation' or u == 'automation_run' %}aria-current="page"{% endif %}>Automation</a>
+      <a href="{% url 'monitor' %}" {% if u == 'monitor' or u == 'monitor_dataset' %}aria-current="page"{% endif %}>Live monitor</a>
+      <a href="{% url 'alert_list' %}" {% if u == 'alert_list' or u == 'alert_detail' %}aria-current="page"{% endif %}>Alerts<span class="badge" id="alert-badge" hidden></span></a>
+      <a href="{% url 'customers' %}" {% if u == 'customers' %}aria-current="page"{% endif %}>Customers</a>
+    </nav>
+    {% endwith %}
+    <span class="spacer"></span>
+    <button class="btn ghost small" id="notify-btn" hidden>Turn on desktop alerts</button>
+    {% if user.is_authenticated %}
+    <form method="post" action="{% url 'staff_logout' %}" class="who">{% csrf_token %}<span class="small muted">{{ user.get_username }}</span> <button class="linklike small">Sign out</button></form>
+    {% endif %}
+  </header>
+  <main>
+    {% for m in messages %}<div class="flash {{ m.tags }}" role="status">{{ m }}</div>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+  {% include "detector/_site_footer.html" %}
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="{% static 'detector/app.js' %}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

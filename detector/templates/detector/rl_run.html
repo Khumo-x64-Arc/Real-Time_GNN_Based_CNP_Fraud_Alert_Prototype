@@ -1,0 +1,129 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}{{ run.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="small muted" style="margin:0"><a href="{% url 'rl' %}">RL agent</a> / {{ run.get_kind_display }}</p>
+    <h1>{{ run.name }}</h1>
+    {% if res %}
+    <ul class="facts">
+      <li><b>{{ res.dataset.rows|floatformat:"0g" }}</b> transactions</li>
+      <li><b>{{ res.dataset.frauds|floatformat:"0g" }}</b> fraudulent ({{ res.dataset.fraud_rate|pct:3 }})</li>
+      <li><b>{{ res.params.label_rate|pct:0 }}</b> of labels revealed, {{ res.params.delay_windows }} window{{ res.params.delay_windows|pluralize }} late</li>
+      <li>{{ res.params.windows_test }} test windows of {{ res.params.window_minutes|floatformat:"0" }} min</li>
+    </ul>
+    {% endif %}
+  </div>
+  <form method="post" action="{% url 'rl_delete' run.pk %}" class="actions" onsubmit="return confirm('Delete this run?')">{% csrf_token %}<button class="btn danger">Delete</button></form>
+</div>
+
+{% if run.status == "queued" or run.status == "running" %}
+<section class="panel" id="training" data-status-url="{% url 'rl_status' run.pk %}">
+  <h2 style="margin-top:0">Running</h2>
+  <p class="muted" id="progress-msg">{{ run.progress_message|default:"Waiting to start" }}</p>
+  <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ run.progress }}"><i style="width: {{ run.progress }}%"></i></div>
+  <p class="small muted">The European Cardholder file takes about 20 minutes; the full IEEE-CIS file much longer. This page updates by itself.</p>
+</section>
+{% elif run.status == "failed" %}
+<section class="panel" style="border-left:4px solid var(--fraud)"><h2 style="margin-top:0">The run stopped with an error</h2><p>{{ run.error }}</p></section>
+{% else %}
+
+<section class="panel verdict {% if agent_vs_static > 0 %}win{% elif agent_vs_fixed < 0 %}loss{% endif %}">
+  <p style="margin:0;font-size:1.05rem">
+    Scored on every test label, the RL agent earned <b>{{ res.policies.agent.reward_all|floatformat:1 }}</b> reward (± {{ res.policies.agent.sd.reward_all|floatformat:1 }} across {{ res.params.agent_seeds }} agents), against <b>{{ res.policies.fixed.reward_all|floatformat:1 }}</b> for the GNN at a fixed threshold ({{ agent_vs_fixed|signed:1 }})
+    and <b>{{ res.policies.static.reward_all|floatformat:1 }}</b> for the best fixed setting found on validation data ({{ agent_vs_static|signed:1 }}).
+    It caught <b>{{ res.policies.agent.tp|floatformat:"-1" }}</b> of {{ res.dataset.test_frauds }} test frauds with <b>{{ res.policies.agent.fp|floatformat:"-1" }}</b> false alarms on average; the fixed threshold caught {{ res.policies.fixed.tp }} with {{ res.policies.fixed.fp|floatformat:"0g" }}.
+  </p>
+  <p class="small muted" style="margin:.5rem 0 0">Reward is what the agent optimises, per window: +1 per caught fraud, −1 per missed fraud, −{{ res.params.fp_cost }} per false alarm, divided by the expected number of frauds + 1. During training and on the test stream the agent only ever receives it for labelled transactions; the "all labels" column scores the same objective on every transaction, for evaluation. The best fixed setting was {{ static_label }}.</p>
+</section>
+
+<h2>Decision policies on the test stream</h2>
+<p class="small muted">The three RL rows are the mean over {{ res.params.agent_seeds }} independently trained agents (± standard deviation). Every policy sees the same {{ res.dataset.sizes.test|floatformat:"0g" }} test transactions in the same order, with the same {{ res.labels.visible_test|floatformat:"0g" }} labels revealed ({{ res.labels.visible_test_frauds }} of them frauds) after the same delay. Metrics use every true label; the policies only ever saw the revealed ones. Bold marks the best in a column.</p>
+<div class="table-wrap">
+  <table class="rl">
+    <thead><tr><th>Policy</th><th class="n">F1</th><th class="n">Precision</th><th class="n">Recall</th><th class="n">False-positive rate</th><th class="n">PR-AUC</th><th class="n">ROC-AUC</th><th class="n">Recall@1%</th><th class="n">Frauds caught</th><th class="n">False alarms</th><th class="n">Reward (labelled)</th><th class="n">Reward (all labels)</th></tr></thead>
+    <tbody>
+    {% for p in rows %}
+      <tr>
+        <td><span class="model-name"><span class="swatch" style="background:{{ p.color }}"></span>{{ p.label }}</span></td>
+        <td class="n{% if p.best.f1 %} best{% endif %}">{{ p.f1|num:3 }}{% if p.sd %}<div class="small muted">±{{ p.sd.f1|num:3 }}</div>{% endif %}</td><td class="n">{{ p.precision|num:3 }}</td><td class="n">{{ p.recall|num:3 }}</td>
+        <td class="n">{{ p.fpr|pct:3 }}</td><td class="n{% if p.best.pr_auc %} best{% endif %}">{{ p.pr_auc|num:4 }}{% if p.sd %}<div class="small muted">±{{ p.sd.pr_auc|num:4 }}</div>{% endif %}</td><td class="n">{{ p.roc_auc|num:4 }}</td>
+        <td class="n{% if p.best.recall_at_1pct %} best{% endif %}">{{ p.recall_at_1pct|num:3 }}</td><td class="n">{{ p.tp|floatformat:"-1" }} of {{ res.dataset.test_frauds }}</td>
+        <td class="n">{{ p.fp|floatformat:"-1" }}</td><td class="n">{{ p.reward|floatformat:1 }}</td>
+        <td class="n{% if p.best.reward_all %} best{% endif %}">{{ p.reward_all|floatformat:1 }}{% if p.sd %}<div class="small muted">±{{ p.sd.reward_all|floatformat:1 }}</div>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="note">PR-AUC, ROC-AUC and Recall@1% (the share of test frauds among the 1% highest-scored transactions, FraudGNN-RL's practical metric) rank the score each policy actually used: the GNN's log-odds plus its chosen weight times the label-propagation evidence. The fixed threshold uses the GNN alone, so its ranking metrics are the GNN's own.</p>
+
+<div class="grid-2" style="margin-top:1.5rem">
+  <section class="panel"><h3>Cumulative reward over the test stream</h3>{% include "detector/_rl_chart.html" with c=cum aria="Cumulative reward per policy" %}</section>
+  <section class="panel"><h3>What the agent chose</h3>
+    <p class="small muted" style="margin-top:0">Threshold offset from the validation threshold (log-odds) and label-propagation weight, window by window.</p>
+    {% include "detector/_rl_chart.html" with c=decisions aria="Agent threshold and label-propagation weight over time" %}
+    <div class="grid-2 tight" style="margin-top:.8rem">
+      <div><h4 class="small" style="margin:.2rem 0">Threshold offset</h4><div class="usage">{% for u in usage_theta %}<div class="usage-row"><span>{{ u.label }}</span><span class="bar"><i style="width:{{ u.w }}%"></i></span><span class="small muted">{{ u.n }}</span></div>{% endfor %}</div></div>
+      <div><h4 class="small" style="margin:.2rem 0">LP weight</h4><div class="usage">{% for u in usage_w %}<div class="usage-row"><span>{{ u.label }}</span><span class="bar"><i style="width:{{ u.w }}%"></i></span><span class="small muted">{{ u.n }}</span></div>{% endfor %}</div>
+        <h4 class="small" style="margin:.6rem 0 .2rem">Pseudo-labelling</h4><div class="usage">{% for u in usage_pl %}<div class="usage-row"><span>{{ u.label }}</span><span class="bar"><i style="width:{{ u.w }}%"></i></span><span class="small muted">{{ u.n }}</span></div>{% endfor %}</div></div>
+    </div>
+  </section>
+</div>
+<div class="grid-2" style="margin-top:1.5rem">
+  <section class="panel"><h3>Frauds caught</h3>{% include "detector/_rl_chart.html" with c=caught aria="Cumulative frauds caught per policy" %}</section>
+  <section class="panel"><h3>False alarms</h3>{% include "detector/_rl_chart.html" with c=alarms aria="Cumulative false alarms per policy" %}</section>
+</div>
+
+<h2>How the agent learned</h2>
+<section class="panel">
+  <p class="small muted" style="margin-top:0">Reward per training episode on the validation stream, each episode with a fresh random {{ res.params.label_rate|pct:0 }} of labels revealed. Exploration is fully random (ε = 1) for the first {% if eps_end %}{{ eps_end|add:"-1" }}{% else %}70{% endif %} episodes, then decays exponentially to 0.05 (DRL+GNN's schedule). The dashed line is the best fixed setting's average validation reward.</p>
+  {% include "detector/_rl_chart.html" with c=learn aria="Training reward per episode" %}
+</section>
+
+<h2>The semi-supervised GNN</h2>
+<p class="small muted">The GNN saw {{ res.labels.visible_train|floatformat:"0g" }} labelled training transactions ({{ res.labels.visible_train_frauds }} frauds) out of {{ res.dataset.sizes.train|floatformat:"0g" }}, and {{ res.labels.visible_val|floatformat:"0g" }} labelled validation transactions ({{ res.labels.visible_val_frauds }} frauds). Scores below are for the test period, each transaction scored with only earlier transactions as neighbours. The threshold for F1 is chosen on labelled validation data.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>GNN</th><th class="n">ROC-AUC</th><th class="n">PR-AUC</th><th class="n">F1</th><th class="n">Precision</th><th class="n">Recall</th><th class="n">Recall@1%</th></tr></thead>
+    <tbody>{% for r in semi_rows %}<tr{% if r.key == "reference" %} class="muted"{% endif %}><td>{{ r.label }}</td><td class="n">{{ r.roc_auc|num:4 }}</td><td class="n">{{ r.pr_auc|num:4 }}</td><td class="n">{{ r.f1|num:3 }}</td><td class="n">{{ r.precision|num:3 }}</td><td class="n">{{ r.recall|num:3 }}</td><td class="n">{{ r.recall_at_1pct|num:3 }}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+<details style="margin-top:1rem"><summary><b>Self-training rounds</b></summary>
+<div class="table-wrap" style="margin-top:.6rem"><table>
+  <thead><tr><th>Round</th><th class="n">Pseudo-labelled frauds</th><th class="n">Their precision</th><th class="n">Pseudo-labelled legitimate</th><th class="n">Their error rate</th><th class="n">Labelled-validation PR-AUC</th><th class="n">Time</th></tr></thead>
+  <tbody>{% for h in history %}<tr{% if forloop.counter0 == res.semi_supervised.best_round %} style="font-weight:600"{% endif %}><td>{{ h.round|add:1 }}{% if forloop.counter0 == res.semi_supervised.best_round %} <span class="tag">Kept</span>{% endif %}</td><td class="n">{{ h.pseudo_frauds|floatformat:"0g" }}</td><td class="n">{% if h.pseudo_fraud_precision is not None %}{{ h.pseudo_fraud_precision|pct:1 }}{% else %}–{% endif %}</td><td class="n">{{ h.pseudo_legit|floatformat:"0g" }}</td><td class="n">{% if h.pseudo_legit_error is not None %}{{ h.pseudo_legit_error|pct:3 }}{% else %}–{% endif %}</td><td class="n">{{ h.labelled_val_pr_auc|num:3 }}</td><td class="n">{{ h.seconds }}s</td></tr>{% endfor %}</tbody>
+</table></div>
+<p class="small muted">Pseudo-label precision and error are measured against the hidden labels for this report only; training never sees them.</p>
+</details>
+
+<details style="margin-top:1rem"><summary><b>Data, graph and settings</b></summary>
+<div class="table-wrap" style="margin-top:.6rem"><table><tbody>
+  <tr><td>Split (by time)</td><td>{{ res.dataset.sizes.train|floatformat:"0g" }} train · {{ res.dataset.sizes.val|floatformat:"0g" }} validation (agent training) · {{ res.dataset.sizes.test|floatformat:"0g" }} test, over {{ res.dataset.span_days|floatformat:1 }} days</td></tr>
+  <tr><td>Node features</td><td>{{ res.dataset.features }}</td></tr>
+  {% with gs=res.dataset.graph %}
+  {% if gs.relation %}<tr><td>Similarity graph</td><td>Up to {{ gs.k }} earlier transactions within {{ gs.window_s|floatformat:"0" }} s with cosine similarity ≥ {{ gs.min_sim }} · {{ gs.edges|floatformat:"0g" }} links · mean degree {{ gs.mean_degree|floatformat:2 }} · {{ gs.isolated|pct:1 }} isolated</td></tr>{% endif %}
+  {% if gs.entities %}<tr><td>Entity graph</td><td>{% for k, v in gs.entities.items %}{{ k }}: {{ v.entities|floatformat:"0g" }} ({{ v.linked|pct:0 }} of transactions linked){% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+  <tr><td>V block</td><td>{{ gs.v_columns_used }} V columns (≤15% missing) compressed to {{ gs.v_components }} principal components, {{ gs.v_variance_kept|pct:0 }} of their variance</td></tr>{% endif %}
+  {% endwith %}
+  <tr><td>DQN</td><td>2 × 128 hidden units, Adam 1e-3, batch 64, double DQN with a target network, 4,000-transition FIFO replay, γ 0.95, {{ res.params.episodes }} episodes of {{ res.params.windows_val }} windows</td></tr>
+  <tr><td>Time</td><td>{% for k, v in res.timings.items %}{{ k }} {{ v }}s{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+</tbody></table></div>
+</details>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+  const box = document.getElementById("training");
+  if (box) {
+    const bar = box.querySelector(".progress i"), msg = document.getElementById("progress-msg");
+    const tick = async () => {
+      const d = await (await fetch(box.dataset.statusUrl)).json();
+      bar.style.width = d.progress + "%";
+      msg.textContent = d.message || "Waiting to start";
+      if (!["queued", "running"].includes(d.status)) location.reload(); else setTimeout(tick, 2000);
+    };
+    setTimeout(tick, 1500);
+  }
+</script>
+{% endblock %}

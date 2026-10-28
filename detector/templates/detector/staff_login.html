@@ -1,0 +1,24 @@
+{% load static %}<!doctype html>
+<html lang="en"><head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analyst sign-in · Khumo Detection Fraud Systems</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'detector/app.css' %}">
+  <link rel="icon" type="image/png" href="{% static 'detector/img/favicon.png' %}">
+</head>
+<body class="auth-page">
+  <main class="auth-card">
+    <img src="{% static 'detector/img/logo-480.png' %}" alt="Khumo Detection Fraud Systems" width="240" height="83" class="auth-logo">
+    <h1>Analyst console</h1>
+    <p class="muted small">Sign in with a staff account. Create one with <code>python manage.py createsuperuser</code>.</p>
+    <form method="post" class="stack">{% csrf_token %}
+      {% if form.non_field_errors %}<div class="flash error">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+      <div><label for="id_username">Username</label><input type="text" name="username" id="id_username" autocomplete="username" required autofocus value="{{ form.username.value|default:'' }}"></div>
+      <div><label for="id_password">Password</label><input type="password" name="password" id="id_password" autocomplete="current-password" required></div>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+    <p class="small muted">Are you a customer? <a href="{% url 'customer_login' %}">Sign in to your account</a>.</p>
+  </main>
+  {% include "detector/_site_footer.html" %}
+  <div class="brand-band" aria-hidden="true"></div>
+</body></html>

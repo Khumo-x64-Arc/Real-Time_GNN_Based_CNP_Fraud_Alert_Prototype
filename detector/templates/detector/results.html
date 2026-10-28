@@ -1,0 +1,244 @@
+{% extends "detector/base.html" %}{% load fw static %}
+{% block title %}Results{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>GNN results</h1>
+    <p class="muted">How the graph neural network performs on transactions it never saw labels for: on the full transaction graph, and live, one transaction at a time, the way the monitor scores.</p>
+  </div>
+  {% if selected %}
+  <div class="actions">
+    <form method="get" class="field" style="display:grid;gap:.25rem">
+      <label for="res-ds" class="small muted" style="font-weight:500;margin:0">Dataset</label>
+      <select id="res-ds" name="dataset" onchange="this.form.submit()">
+        {% for d in ready %}<option value="{{ d.pk }}" {% if d.pk == selected.pk %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+      </select>
+      <noscript><button class="btn ghost small">Show</button></noscript>
+    </form>
+    <a class="btn ghost" href="{% url 'results_export' %}" style="align-self:end">Download CSV</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if not selected %}
+<div class="panel empty">
+  <h3>No results yet</h3>
+  <p>Results appear here once a labelled dataset has finished training.</p>
+  <a class="btn" href="{% url 'upload' %}">Upload a dataset</a>
+</div>
+{% else %}
+
+<p class="small muted" style="margin-top:-.5rem">
+  <b style="color:var(--ink)">{{ selected.name }}</b> · tested on {{ res.sizes.test|floatformat:"0g" }} transactions containing {{ res.test_frauds }} frauds
+  · {% if res.split == "time" %}time-ordered split{% else %}stratified split{% endif %}
+  · <a href="{{ selected.get_absolute_url }}">Graph ablation, threshold sweep and behavioural signals</a>
+</p>
+
+{% with fs=res.fsmote %}{% if fs %}
+<p class="small muted fs-line">{% if fs.synthetic %}<b style="color:var(--ink)">FSMOTE</b> added {{ fs.synthetic|floatformat:"0g" }} synthetic frauds to the {{ fs.minority_before|floatformat:"0g" }} real ones in training, against {{ fs.majority|floatformat:"0g" }} legitimate transactions ({% if fs.imbalance_after <= 1.01 %}balanced{% else %}1 : {{ fs.imbalance_after|floatformat:1 }}{% endif %}, was 1 : {{ fs.imbalance_before|floatformat:0 }}). {{ fs.used_as_seed|floatformat:"0g" }} frauds closest to the legitimate class seeded them. Validation and test data are untouched.{% elif fs.method == "off" %}FSMOTE is switched off (<code>FSMOTE_RATIO=0</code>); the GNN uses class weights instead.{% endif %}</p>
+{% endif %}{% endwith %}
+{% if legacy %}<p class="note">This dataset was trained by an earlier version that compared several models; only its full-graph GNN result is shown. <a href="{{ selected.get_absolute_url }}">Retrain it</a> to add the live test, the graph ablation and the threshold sweep.</p>{% endif %}
+<h2 style="margin-top:1.2rem">Scorecards</h2>
+<div class="scorecards">
+  {% for c in cards %}
+  <article class="scorecard" style="--c: {{ c.color }}">
+    <header>
+      <h3><span class="swatch" style="background:{{ c.color }}"></span>{{ c.label }}</h3>
+      <span class="small muted">{% if c.r.name == "GNN live" %}What the live monitor does{% else %}Every transaction sees the whole graph{% endif %}</span>
+    </header>
+    <dl class="metric-list">
+      {% for m in c.metrics %}
+      <div>
+        <dt>{{ m.label }}</dt>
+        <dd><span class="mv">{{ m.v|num:4 }}</span><span class="mbar" aria-hidden="true"><i style="width: {{ m.v|mul:100 }}%"></i></span></dd>
+      </div>
+      {% endfor %}
+    </dl>
+    <div class="cm-mini" aria-label="Confusion matrix counts">
+      <div class="good"><b>{{ c.r.tp|floatformat:"0g" }}</b><span>TP</span></div>
+      <div class="bad"><b>{{ c.r.fp|floatformat:"0g" }}</b><span>FP</span></div>
+      <div class="bad"><b>{{ c.r.fn|floatformat:"0g" }}</b><span>FN</span></div>
+      <div class="good"><b>{{ c.r.tn|floatformat:"0g" }}</b><span>TN</span></div>
+    </div>
+    <p class="small muted" style="margin:.7rem 0 0">Catches {{ c.caught|pct:1 }} of frauds; flags {{ c.fpr|pct:2 }} of legitimate transactions. Threshold {{ c.r.threshold|num:3 }} · {% if c.r.name == "GNN live" %}streamed in{% else %}trained in{% endif %} {{ c.r.train_seconds }}s.</p>
+  </article>
+  {% endfor %}
+</div>
+
+{% if gap %}
+<h2>Full graph vs live</h2>
+<p class="small muted">The same trained GNN, scored two ways. On the full graph each test transaction also sees later transactions on its account, device or IP; live it sees only the past. The difference is what scoring in real time costs, and the live numbers are the ones to expect from the monitor.</p>
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Metric</th><th class="n">Full graph</th><th class="n">Live (streaming)</th><th class="n">Change</th></tr></thead>
+    <tbody>{% for g in gap %}<tr><td>{{ g.label }}</td><td class="n">{{ g.full|num:4 }}</td><td class="n">{{ g.live|num:4 }}</td><td class="n" style="{% if g.d < -0.0005 %}color:var(--fraud);font-weight:600{% endif %}">{{ g.d|signed }}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+<p class="note">Accuracy sits near 1 because only {{ res.fraud_rate|pct:2 }} of transactions are fraud. Precision, recall, F1 and PR-AUC show the real differences.</p>
+
+<h2 id="oversampling">With and without oversampling</h2>
+<p class="small muted">The same GNN trained twice on the same data, split and seed: once with FSMOTE adding synthetic frauds to the training slice, once without (class weights only). Each version picks its own alert threshold on validation data, and both are tested on the full graph and live.</p>
+{% if os_state == "ready" %}
+<div class="os-legend small"><span><i class="os-sw os-with"></i>With FSMOTE{% if os_fs.synthetic %} ({{ os_fs.synthetic|floatformat:"0g" }} synthetic frauds){% endif %}</span><span><i class="os-sw os-without"></i>Without oversampling</span><span class="muted">The {% if os_main == "with" %}with-FSMOTE{% else %}without-oversampling{% endif %} version is the one the scorecards above and the live monitor use.</span></div>
+<div class="grid-2 os-grid">
+  {% for t in os_tables %}
+  <section class="panel">
+    <h3 style="margin-top:0">{{ t.label }}</h3>
+    <div class="os-bars">
+      {% for r in t.rows %}{% if r.kind == "num" and r.label != "Accuracy" %}
+      <div class="os-row"><span class="os-name">{{ r.label }}</span>
+        <span class="os-pair"><span class="os-track"><span class="os-bar os-with" style="width:{{ r.with|mul:100 }}%"></span></span><span class="os-v">{{ r.with|num:3 }}</span></span>
+        <span class="os-pair"><span class="os-track"><span class="os-bar os-without" style="width:{{ r.without|mul:100 }}%"></span></span><span class="os-v">{{ r.without|num:3 }}</span></span>
+      </div>{% endif %}{% endfor %}
+    </div>
+    <div class="table-wrap"><table class="os-table">
+      <thead><tr><th>Metric</th><th class="n">With FSMOTE</th><th class="n">Without</th><th class="n">Change</th></tr></thead>
+      <tbody>{% for r in t.rows %}<tr><td>{{ r.label }}</td>
+        <td class="n{% if r.better == 'with' %} os-best{% endif %}">{% if r.kind == "int" %}{{ r.with|floatformat:"0g" }}{% else %}{{ r.with|num:4 }}{% endif %}</td>
+        <td class="n{% if r.better == 'without' %} os-best{% endif %}">{% if r.kind == "int" %}{{ r.without|floatformat:"0g" }}{% else %}{{ r.without|num:4 }}{% endif %}</td>
+        <td class="n small">{% if r.kind == "int" %}{{ r.d|delta:0 }}{% else %}{{ r.d|delta }}{% endif %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    <p class="small muted" style="margin:.5rem 0 0">Thresholds {{ t.thr_with|num:3 }} (with) and {{ t.thr_without|num:3 }} (without), chosen on validation data. Bold: the better of the two.</p>
+  </section>
+  {% endfor %}
+</div>
+<p class="small muted">Trained in {{ os_with.train_seconds }} s with FSMOTE and {{ os_without.train_seconds }} s without. Best validation PR-AUC {{ os_with.best_val_ap|num:3 }} and {{ os_without.best_val_ap|num:3 }}.{% if os_block.computed_at %} Comparison run {{ os_block.computed_at }}.{% endif %} Set <code>FSMOTE_RATIO=0</code> to make the version without oversampling the default for new uploads.</p>
+{% elif os_state == "running" %}
+<div class="panel"><p style="margin:0">Training the comparison GNN: {{ os_block.message|default:"starting" }} ({{ os_block.progress|default:0 }}%). <a href="?dataset={{ selected.pk }}#oversampling">Refresh</a> in a minute.</p></div>
+{% else %}
+<div class="panel">
+  {% if os_state == "failed" %}<p style="margin-top:0;color:var(--fraud)">The last comparison stopped with an error: {{ os_block.error }}</p>{% endif %}
+  <p style="margin-top:0">This dataset was trained before the comparison was added. Run it to train the same GNN with oversampling switched the other way; the dataset and its scorecards stay as they are. It takes about as long as the original training.</p>
+  <form method="post" action="{% url 'dataset_oversampling' selected.pk %}">{% csrf_token %}<button class="btn">Compare with and without oversampling</button></form>
+</div>
+{% endif %}
+
+{% if os_study %}
+<h3>In the study: the semi-supervised GNN and the RL agent</h3>
+<p class="small muted">{{ os_study.note }} Bold: the better of the two.</p>
+<div class="table-wrap"><table class="os-table os-study">
+  <thead>
+    <tr><th rowspan="2">Test F1 by policy</th>{% for ds in os_study.datasets %}<th colspan="2" class="c">{{ ds.name }}</th>{% endfor %}</tr>
+    <tr>{% for ds in os_study.datasets %}<th class="n">FSMOTE</th><th class="n">None</th>{% endfor %}</tr>
+  </thead>
+  <tbody>{% for r in os_study.rows %}
+    <tr{% if r.sep %} class="group-start"{% endif %}><td>{{ r.label }}</td>
+      {% for c in r.cells %}
+      <td class="n{% if c.better == 'with' %} os-best{% endif %}">{% if r.kind == "int" %}{{ c.with|floatformat:"0g" }}{% else %}{{ c.with|num:3 }}{% endif %}</td>
+      <td class="n{% if c.better == 'without' %} os-best{% endif %}">{% if r.kind == "int" %}{{ c.without|floatformat:"0g" }}{% else %}{{ c.without|num:3 }}{% endif %}</td>
+      {% endfor %}</tr>
+  {% endfor %}</tbody>
+</table></div>
+<p class="small muted">Switching FSMOTE off raised the European GNN's PR-AUC from 0.705 to 0.801 and halved its false alarms; on IEEE-CIS it helped slightly and on the synthetic file it made no material difference. With few labelled frauds and pseudo-labels already enlarging the fraud class, synthetic frauds mostly added noise.</p>
+{% endif %}
+
+<h2>Charts</h2>
+<p class="small muted">Hover a chart for exact values. Click an entry in any legend to hide or show it on every chart. Each chart has a data table underneath.</p>
+<div class="grid-2 charts">
+  <section class="panel chart-panel" data-chart="roc">
+    <h3>ROC curves</h3>
+    <p class="small muted">Share of frauds caught against the share of legitimate transactions flagged. The axis is logarithmic because fraud detection happens below 1% false positives. Dots mark the alert thresholds.</p>
+    <div class="chart"></div>
+  </section>
+  <section class="panel chart-panel" data-chart="pr">
+    <h3>Precision–recall curves</h3>
+    <p class="small muted">With so few frauds this is the fairer view: how many alerts are real frauds (precision) as more frauds are caught (recall). Dots mark the alert thresholds.</p>
+    <div class="chart"></div>
+  </section>
+</div>
+
+<section class="panel chart-panel" data-chart="caught" style="margin-top:1.5rem">
+  <div class="grid-2 tight">
+    <div>
+      <h3>Frauds caught at the alert threshold</h3>
+      <p class="small muted">Out of {{ res.test_frauds }} frauds in the test period.</p>
+      <div class="chart"></div>
+    </div>
+    <div>
+      <h3>False alarms</h3>
+      <p class="small muted">Legitimate transactions the GNN would have flagged.</p>
+      <div class="chart" data-chart-part="alarms"></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel chart-panel" data-chart="hist" style="margin-top:1.5rem">
+  <h3>Score distributions</h3>
+  <p class="small muted">Where the GNN puts frauds (red bars) and legitimate transactions (grey outline), as a share of each group. The further apart they sit, the cleaner the separation. The vertical line is the alert threshold.</p>
+  <ul class="legend"><li><span class="sq fraud"></span>Frauds</li><li><span class="sq legit"></span>Legitimate</li><li><svg class="sw" width="18" height="10" aria-hidden="true"><line class="thr" x1="9" x2="9" y1="0" y2="10"/></svg>Alert threshold</li></ul>
+  <div class="multiples"></div>
+</section>
+
+<section class="panel chart-panel" data-chart="training" style="margin-top:1.5rem">
+  <h3>Training curves</h3>
+  <p class="small muted">Validation PR-AUC as the GNN learned, every 5 epochs. Training stops once it no longer improves, and the best point (dot) is the epoch that was kept.</p>
+  <div class="multiples"></div>
+</section>
+
+<h2>Transaction graph</h2>
+<p class="small muted">The whole graph the GNN learns from. Every transaction is linked to the account, card, device, IP and merchant it used. Accounts sit in the middle of their own cluster, with their cards, devices and IPs around them. Clusters spanning several accounts share a device or IP, and when they carry fraud they're listed as fraud rings. Merchants link almost everything, so they sit on the outer ring.</p>
+{% if graph_ready %}
+<section class="panel tg" id="txgraph" data-meta="{% url 'graph_meta' selected.pk %}" data-data="{% url 'graph_data' selected.pk %}" data-tx="{% url 'graph_tx' selected.pk 0 %}">
+  <div class="tg-toolbar">
+    <form class="tg-search" role="search">
+      <label class="sr-only" for="tg-q">Find an account, card, device, IP address or merchant</label>
+      <input id="tg-q" type="search" placeholder="Find an account, device, IP…" autocomplete="off">
+      <button class="btn ghost small">Find</button>
+    </form>
+    <div class="tg-zoom">
+      <button type="button" class="btn ghost small tg-out" aria-label="Zoom out">−</button>
+      <button type="button" class="btn ghost small tg-in" aria-label="Zoom in">+</button>
+      <button type="button" class="btn ghost small tg-fit">Fit</button>
+    </div>
+  </div>
+  <p class="tg-search-msg small" role="status"></p>
+  <div class="tg-filters"></div>
+  <p class="tg-note small muted"></p>
+  <div class="tg-layout">
+    <div class="tg-canvas"><p class="tg-status small muted">The graph loads when you scroll to it.</p></div>
+    <aside class="tg-side">
+      <div class="tg-stats"></div>
+      <h4>Selection</h4>
+      <div class="tg-details" aria-live="polite"></div>
+      <h4>Fraud rings</h4>
+      <div class="tg-rings"></div>
+    </aside>
+  </div>
+  <p class="small muted" style="margin:.8rem 0 0">Drag to pan, scroll or pinch to zoom; with the graph focused, arrow keys pan, + and − zoom, 0 fits and Esc clears the selection. <a href="{% url 'graph_export' selected.pk %}">Download the edge list (CSV)</a> to open it in Gephi or NetworkX.</p>
+</section>
+{% else %}
+<p class="note">This dataset was trained before the transaction graph was added. <a href="{{ selected.get_absolute_url }}">Retrain it</a> to draw the graph.</p>
+{% endif %}
+
+<h2>Across all datasets</h2>
+{% if cross|length < 2 %}<p class="small muted">Only one dataset has been trained so far. Upload another and the GNN's results on each will line up here for comparison.</p>{% endif %}
+{% if cross|length > 1 %}
+<section class="panel chart-panel" data-chart="cross" style="margin-top:1rem">
+  <h3>F1 by dataset</h3>
+  <p class="small muted">The GNN's F1 at its alert threshold on every trained dataset, on the full graph and live.</p>
+  <div class="chart"></div>
+</section>
+{% endif %}
+<div class="table-wrap" style="margin-top:1rem">
+  <table class="cross">
+    <thead><tr><th>Dataset</th><th>Evaluation</th>{% for k, label in metrics %}<th class="n">{{ label }}</th>{% endfor %}<th class="n">TP</th><th class="n">FP</th><th class="n">FN</th><th class="n">TN</th></tr></thead>
+    {% for block in cross %}
+    <tbody{% if block.ds.pk == selected.pk %} class="current"{% endif %}>
+      {% for row in block.rows %}
+      <tr>
+        {% if forloop.first %}<th scope="rowgroup" rowspan="{{ block.rows|length }}"><a href="?dataset={{ block.ds.pk }}">{{ block.ds.name }}</a><div class="small muted">{{ block.ds.results.rows|floatformat:"0g" }} rows · {{ block.ds.results.fraud_rate|pct:2 }} fraud{% if block.legacy %} · older version{% endif %}</div></th>{% endif %}
+        <td><span class="model-name"><span class="swatch" style="background:{{ row.color }}"></span>{{ row.label }}</span></td>
+        <td class="n">{{ row.r.roc_auc|num:4 }}</td><td class="n">{{ row.r.pr_auc|num:4 }}</td><td class="n">{{ row.r.f1|num:4 }}</td>
+        <td class="n">{{ row.r.accuracy|num:4 }}</td><td class="n">{{ row.r.precision|num:4 }}</td><td class="n">{{ row.r.recall|num:4 }}</td>
+        <td class="n">{{ row.r.tp|floatformat:"0g" }}</td><td class="n">{{ row.r.fp|floatformat:"0g" }}</td><td class="n">{{ row.r.fn|floatformat:"0g" }}</td><td class="n">{{ row.r.tn|floatformat:"0g" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% endfor %}
+  </table>
+</div>
+{{ chart_data|json_script:"chart-data" }}
+{% endif %}
+{% endblock %}
+{% block scripts %}{% if selected %}<script src="{% static 'detector/charts.js' %}"></script>{% if graph_ready %}<script src="{% static 'detector/graph.js' %}"></script>{% endif %}{% endif %}{% endblock %}

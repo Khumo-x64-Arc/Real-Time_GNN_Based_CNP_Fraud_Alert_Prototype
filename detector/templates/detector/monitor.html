@@ -1,0 +1,65 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}Live monitor{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Live monitor</h1>
+    <p class="muted">Replays the test period, one transaction at a time, through the trained GNN: each is scored against the graph of earlier transactions, then joins it. Alerts are saved{% if ds %}, emailed if configured,{% endif %} and pop up on any page.</p>
+  </div>
+  {% if ready %}
+  <div class="field">
+    <label for="ds-select" class="small muted" style="font-weight:500">Dataset</label>
+    <select id="ds-select" onchange="location.href=this.value">
+      {% for d in ready %}<option value="{% url 'monitor_dataset' d.pk %}" {% if ds and d.pk == ds.pk %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+    </select>
+  </div>
+  {% endif %}
+</div>
+
+{% if not ds %}
+<div class="panel empty">
+  <h3>Nothing to monitor yet</h3>
+  <p>Upload and train a labelled dataset first (datasets trained by an earlier version need retraining); its test period becomes the live stream.</p>
+  <a class="btn" href="{% url 'upload' %}">Upload a dataset</a>
+</div>
+{% else %}
+<div class="controls" id="controls" data-stream-url="{% url 'monitor_stream' ds.pk %}" data-review-url="/alerts/0/review/" data-csrf="{{ csrf_token }}">
+  <div class="field"><label for="rate">Speed</label>
+    <select id="rate"><option value="2">2 per second</option><option value="6" selected>6 per second</option><option value="20">20 per second</option><option value="60">60 per second</option></select></div>
+  <div class="field"><label for="start">Start at transaction</label>
+    <input type="text" inputmode="numeric" id="start" value="0" size="7" aria-describedby="start-help"></div>
+  <label style="display:flex;gap:.4rem;align-items:center;font-weight:500;margin:0 0 .45rem"><input type="checkbox" id="only-flagged"> Only show flagged</label>
+  <button class="btn" id="play">Start stream</button>
+  <span class="small muted" id="stream-state" aria-live="polite">{{ replay_rows|floatformat:"0g" }} transactions available</span>
+</div>
+
+<div class="counters" aria-live="off">
+  <div><b id="c-seen">0</b><span>Transactions scored</span></div>
+  <div><b id="c-fraud" style="color:var(--fraud)">0</b><span>Fraud alerts</span></div>
+  <div><b id="c-review" style="color:var(--review)">0</b><span>Sent for review</span></div>
+  <div><b id="c-caught">0 / 0</b><span>Known frauds caught</span></div>
+</div>
+
+<div class="monitor">
+  <section aria-label="Transaction stream">
+    <div class="tape" id="tape"><div class="empty">Press <b>Start stream</b> to begin scoring transactions.</div></div>
+    <p class="small muted">The bar is the GNN's fraud probability; its tick marks the alert threshold ({{ thresholds.GNN|num:3 }}, chosen on streamed validation data). {% if live_result %}In testing, {{ live_label }} caught {{ live_result.tp }} of {{ live_result.tp|add:live_result.fn }} test frauds with {{ live_result.fp|floatformat:"0g" }} false alarm{{ live_result.fp|pluralize }}, so expect about that here.{% endif %} A transaction just under the threshold is sent for review when its behavioural signals are strong.</p>
+  </section>
+  <aside aria-label="Alerts">
+    <h3>Alerts as they happen</h3>
+    <div class="alert-feed" id="feed"><div class="empty small">No alerts yet.</div></div>
+  </aside>
+</div>
+
+<details style="margin-top:2rem">
+  <summary><b>Score your own transactions through the API</b></summary>
+  <p class="small">Send transactions with the same column names as <b>{{ ds.name }}</b>. Each call updates the account's behaviour profile, so send them in time order.</p>
+<pre class="panel small" style="overflow-x:auto"><code>curl -X POST http://{{ request.get_host }}{% url 'api_score' ds.pk %} \
+  -H "Content-Type: application/json" \
+  -d '{"transaction": {"{{ ds.schema.tx_id|default:"transaction_id" }}": "TEST-1", "{{ ds.schema.amount|default:"Amount" }}": 4999.0{% if ds.schema.account %}, "{{ ds.schema.account }}": "ACC0012700"{% endif %}{% if ds.schema.country %}, "{{ ds.schema.country }}": "NG"{% endif %}}}'</code></pre>
+  <p class="small muted">Missing columns fall back to training medians. The response holds the GNN's probability and threshold, the decision and the behavioural signals.</p>
+</details>
+{{ thresholds|json_script:"thresholds" }}
+{% endif %}
+{% endblock %}
+{% block scripts %}{% if ds %}{% load static %}<script src="{% static 'detector/monitor.js' %}"></script>{% endif %}{% endblock %}

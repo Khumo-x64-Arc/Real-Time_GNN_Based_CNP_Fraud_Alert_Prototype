@@ -1,0 +1,22 @@
+{% extends "detector/customer/base.html" %}
+{% block title %}Enrol{% endblock %}
+{% block content %}
+<section class="auth-card inline">
+  <h1>Enrol your account</h1>
+  {% if not available %}
+  <p>Self-enrolment isn't available yet. Your bank can enrol you instead.</p>
+  <p class="small"><a href="{% url 'customer_login' %}">Back to sign-in</a></p>
+  {% else %}
+  <p class="muted">We check your account number against the last four digits of a card on it, so only the account holder can enrol.</p>
+  <form method="post" class="stack" novalidate>{% csrf_token %}
+    {% if form.non_field_errors %}<div class="flash error">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+    {% for f in form %}
+    {% if f.name == "dataset" and f.field.queryset.count == 1 %}<input type="hidden" name="dataset" value="{{ f.field.queryset.first.pk }}">
+    {% else %}<div><label for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{{ f.errors }}</div>{% endif %}
+    {% endfor %}
+    <button class="btn" type="submit">Enrol and sign in</button>
+  </form>
+  <p class="small">Already enrolled? <a href="{% url 'customer_login' %}">Sign in</a></p>
+  {% endif %}
+</section>
+{% endblock %}

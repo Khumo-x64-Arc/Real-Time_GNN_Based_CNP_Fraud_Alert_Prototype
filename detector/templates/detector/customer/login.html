@@ -1,0 +1,16 @@
+{% extends "detector/customer/base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<section class="auth-card inline">
+  <h1>Watch your account in real time</h1>
+  <p class="muted">See every card transaction as it happens and get an alert the moment something looks unusual.</p>
+  <form method="post" class="stack">{% csrf_token %}
+    {% if form.non_field_errors %}<div class="flash error">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+    <div><label for="id_username">Username</label><input type="text" name="username" id="id_username" autocomplete="username" required autofocus value="{{ form.username.value|default:'' }}"></div>
+    <div><label for="id_password">Password</label><input type="password" name="password" id="id_password" autocomplete="current-password" required></div>
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+  <p class="small">New here? <a href="{% url 'customer_signup' %}">Enrol your account</a></p>
+  <p class="small muted">Khumo Detection will never ask for your PIN, password or one-time codes.</p>
+</section>
+{% endblock %}

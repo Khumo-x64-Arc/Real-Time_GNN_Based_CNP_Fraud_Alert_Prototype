@@ -1,0 +1,37 @@
+{% extends "detector/base.html" %}{% load fw %}
+{% block title %}Datasets{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Datasets</h1>
+    <p class="muted">Each upload trains a graph neural network and tests it on the full graph, live (one transaction at a time), and with parts of the graph removed. Every upload keeps its own results.</p>
+  </div>
+  <a class="btn" href="{% url 'upload' %}">Upload a dataset</a>
+</div>
+{% if datasets %}
+<div class="table-wrap">
+  <table>
+    <thead><tr><th>Dataset</th><th>Status</th><th class="n">Rows</th><th class="n">Fraud rate</th><th class="n">GNN F1</th><th class="n">GNN PR-AUC</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>
+    {% for d in datasets %}
+      <tr>
+        <td><a href="{{ d.get_absolute_url }}"><b>{{ d.name }}</b></a><div class="small muted">{{ d.file.name|cut:"datasets/" }}</div></td>
+        <td><span class="status {{ d.status }}">{{ d.get_status_display }}</span></td>
+        <td class="n">{% if d.results.rows %}{{ d.results.rows|floatformat:"0g" }}{% else %}–{% endif %}</td>
+        <td class="n">{% if d.results.fraud_rate %}{{ d.results.fraud_rate|pct:2 }}{% else %}–{% endif %}</td>
+        {% with b=d.gnn_result %}<td class="n">{% if b %}{{ b.f1|num }}{% if b.name == "GNN live" %} <span class="small muted">live</span>{% endif %}{% else %}–{% endif %}</td><td class="n">{% if b %}{{ b.pr_auc|num }}{% else %}–{% endif %}</td>{% endwith %}
+        <td class="small muted">{{ d.uploaded_at|date:"j M Y, H:i" }}</td>
+        <td>{% if d.is_live_ready %}<a class="btn ghost small" href="{% url 'monitor_dataset' d.pk %}">Monitor live</a>{% elif d.status == "ready" %}<a class="small" href="{{ d.get_absolute_url }}">Retrain to test</a>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="panel empty">
+  <h3>No datasets yet</h3>
+  <p>Upload a labelled transactions CSV to train the GNN and test it.</p>
+  <a class="btn" href="{% url 'upload' %}">Upload a dataset</a>
+</div>
+{% endif %}
+{% endblock %}

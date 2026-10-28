@@ -1,0 +1,34 @@
+{% extends "detector/base.html" %}
+{% block title %}Customers{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Customers</h1>
+  <p class="muted">Customers enrolled in the portal see their own account's transactions and alerts live at <a href="{% url 'customer_dashboard' %}">/my/</a>. Only enrolled accounts are recorded.</p></div>
+</div>
+<div class="upload-grid">
+  <section>
+    {% if rows %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>Customer</th><th>Account</th><th class="n">Monitored</th><th class="n">Flagged</th><th class="n">Replies</th><th></th></tr></thead>
+      <tbody>{% for r in rows %}
+        <tr>
+          <td><b>{{ r.p.display_name|default:r.p.user.username }}</b><div class="small muted">{{ r.p.user.username }}{% if r.p.user.email %} · {{ r.p.user.email }}{% endif %}</div></td>
+          <td><code>{{ r.p.account_id }}</code><div class="small muted">{{ r.p.dataset.name }}</div></td>
+          <td class="n">{{ r.monitored }}</td><td class="n">{{ r.flagged }}</td><td class="n">{{ r.responses }}</td>
+          <td><form method="post" action="{% url 'customer_remove' r.p.pk %}" onsubmit="return confirm('Remove {{ r.p.user.username|escapejs }} from the portal?')">{% csrf_token %}<button class="btn danger small">Remove</button></form></td>
+        </tr>{% endfor %}
+      </tbody></table></div>
+    {% else %}
+    <div class="panel empty"><h3>No customers yet</h3><p>Enrol one here, or let customers sign themselves up at <a href="{% url 'customer_signup' %}">/my/signup/</a> with their account number and card digits.</p></div>
+    {% endif %}
+  </section>
+  <section class="panel">
+    <h3>Enrol a customer</h3>
+    <form method="post" class="stack">{% csrf_token %}
+      {% if form.non_field_errors %}<div class="flash error">{{ form.non_field_errors|join:" " }}</div>{% endif %}
+      {% for f in form %}<div><label for="{{ f.id_for_label }}">{{ f.label }}</label>{{ f }}{% if f.help_text %}<div class="helptext">{{ f.help_text }}</div>{% endif %}{{ f.errors }}</div>{% endfor %}
+      <button class="btn" type="submit">Enrol customer</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

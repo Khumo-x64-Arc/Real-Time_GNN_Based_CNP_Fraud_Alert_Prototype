@@ -1,0 +1,12 @@
+{% if c %}<svg class="rlc" viewBox="0 0 {{ c.w }} {{ c.h }}" role="img" aria-label="{{ aria }}">
+  {% for t in c.yticks %}<line class="grid" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ t.y }}" y2="{{ t.y }}"/><text x="{{ c.x0|add:'-6' }}" y="{{ t.y }}" dy="4" text-anchor="end">{{ t.label }}</text>{% endfor %}
+  {% for t in c.xticks %}<text x="{{ t.x }}" y="{{ c.y1|add:'16' }}" text-anchor="middle">{{ t.label }}</text>{% endfor %}
+  {% if c.zero_y %}<line class="axis" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ c.zero_y }}" y2="{{ c.zero_y }}"/>{% endif %}
+  <line class="axis" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ c.y1 }}" y2="{{ c.y1 }}"/>
+  {% if c.hline %}<line class="hl" x1="{{ c.x0 }}" x2="{{ c.x1 }}" y1="{{ c.hline.yy }}" y2="{{ c.hline.yy }}"/><text class="hl-t" x="{{ c.x1 }}" y="{{ c.hline.yy }}" dy="-5" text-anchor="end">{{ c.hline.label }}</text>{% endif %}
+  <text x="{{ c.x1 }}" y="{{ c.h|add:'-4' }}" text-anchor="end">{{ c.x_label }}</text>
+  <text x="12" y="{{ c.y0 }}" transform="rotate(-90 12 {{ c.y0 }})" text-anchor="end" dy="4">{{ c.y_label }}</text>
+  {% for s in c.series %}<polyline class="curve" points="{{ s.points }}" stroke="{{ s.color }}"{% if s.dash %} stroke-dasharray="{{ s.dash }}"{% endif %}><title>{{ s.label }}</title></polyline>{% endfor %}
+</svg>
+<ul class="legend">{% for s in c.series %}<li><svg class="sw" width="22" height="10" aria-hidden="true"><line x1="1" x2="21" y1="5" y2="5" stroke="{{ s.color }}" stroke-width="2.5"{% if s.dash %} stroke-dasharray="{{ s.dash }}"{% endif %}/></svg>{{ s.label }}</li>{% endfor %}</ul>
+{% endif %}
