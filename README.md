@@ -9,6 +9,62 @@
 
 In fulfillment of the 2026 COS 700 research project for the BSc Honours in Computer Science at the University of Pretoria, under the supervision of Prof Jan Eloff.
 
+
+## About
+
+**Khumo Detection Fraud Systems** is a real-time fraud alert prototype for card-not-present (CNP) card fraud, built around a graph neural network (GNN). It was designed, built and evaluated as the research artefact of the COS 700 honours project *Real Time GNN based CNP Fraud Alert Prototype: a semi-supervised graph neural network with a reinforcement-learning decision agent*.
+
+- **Author:** Khumo Rametse
+- **Supervisor:** Prof Jan Eloff
+- **Institution:** Department of Computer Science, Faculty of Engineering, Built Environment and Information Technology, University of Pretoria
+- **Module:** COS 700 Research Project, BSc Honours in Computer Science, 2026
+
+### Why it matters
+
+CNP fraud, a purchase made with stolen card details rather than the physical card, accounts for most card fraud losses in South Africa, and SABRIC reports that most of those losses come from transactions made abroad. Detecting it is hard for three reasons that this project takes seriously:
+
+- **Fraud is rare.** In the most widely used benchmark only 0.17% of transactions are fraud, so a model that never raises an alert looks almost perfectly accurate.
+- **False alarms are expensive.** Every alert costs an investigator's time or a customer's patience, and a blocked card is a bad customer experience.
+- **Labels are scarce and late.** A transaction is confirmed as fraud only after a chargeback or an investigation, often weeks later, and most transactions are never labelled at all.
+
+Fraud is also relational: fraudsters reuse devices, cards, IP addresses and mule accounts. A GNN learns from those links directly, so a transaction that looks normal on its own can look suspicious next to the transactions it shares a device with.
+
+**Method.** The work followed the design science research paradigm: the prototype was built and evaluated in four cycles, each ending in a finding that shaped the next.
+
+| Cycle | What was built | What it showed |
+|---|---|---|
+| 1 | A GNN baseline trained with every label | The GNN separated fraud well but raised many false alarms, and testing on the full graph said nothing about live behaviour. |
+| 2 | A test bench that scores the GNN live, one transaction at a time, using only earlier transactions | Full-graph testing overstated live performance (PR-AUC 0.992 against 0.865), and a train/serve mismatch in live scoring was found and fixed. |
+| 3 | Semi-supervised training with 20% of labels arriving late, and a Deep Q-Network agent (after FraudGNN-RL) that sets the alert threshold, the weight of graph evidence and pseudo-labelling for each time window | Self-training and label propagation helped; the agent beat a fixed threshold but not the best fixed setting. |
+| 4 | Automated detection (the agent decides every transaction and groups escalations into cases and rings), planted fraud rings and adversarial examples | The agent halved false alarms on synthetic South African data; one ring type was missed, and a one-edit attack evaded the GNN until adversarial training. |
+
+**Data.** The European Cardholder dataset (284,807 transactions), IEEE-CIS (590,540 e-commerce transactions) and synthetic South African card data, always split by time (60% training, 15% validation, 25% test) and, from the third cycle on, with only 20% of labels revealed, arriving hours after the transaction.
+
+### Key findings
+
+- **Live scoring is the honest test.** The same GNN that looked almost perfect on the full graph (PR-AUC 0.992) reached 0.865 when scored live, and only after a train/serve mismatch in the live scoring had been fixed (it was 0.794 before).
+- **The graph reduces false alarms.** Self-training raised PR-AUC from 0.691 to 0.705 on the European data and from 0.310 to 0.352 on IEEE-CIS. Label propagation through shared accounts and cards, with a higher threshold, cut IEEE-CIS false alarms by a third (1,619 to 1,103) while catching slightly more frauds.
+- **The RL agent is no silver bullet.** It beat a fixed threshold on IEEE-CIS (F1 0.398 against 0.383) but not the best single setting chosen on validation data. On the synthetic South African data, deciding every transaction on its own, it halved the fixed threshold's false alarms (29 to 14) and did beat the best fixed setting (F1 0.603).
+- **Oversampling was not needed.** With semi-supervised training, switching FSMOTE off raised the European GNN's PR-AUC from 0.705 to 0.801.
+- **Rings are found only if their first members are.** A planted collusive-merchant ring was found as one clean case; a card-testing ring, a pattern seen only once with two labels, was missed.
+- **A GNN that relies on one strong signal is easy to evade.** Transacting from the victim's home country made an optimised attack invisible to the GNN. Adversarial training restored detection and forced an adaptive attacker into four edits and a 95% smaller take per transaction.
+- **It is fast and explainable.** On two CPU cores with no GPU, a transaction is scored in a median of 5 ms and explained, when flagged, in 36 ms. Every alert comes with feature attributions, graph evidence for each linked account, card or device, a counterfactual and a plain-language summary.
+
+### Contributions
+
+- A real-time fraud alert prototype (live monitor, alert queue with explanations, customer portal) around a two-layer relation-wise GNN written in NumPy and SciPy, which trains on a two-core machine without a GPU or deep-learning framework.
+- An evaluation protocol that scores each test transaction using only earlier transactions, as a deployed system would.
+- A semi-supervised training procedure and a DQN decision agent adapted to partial, delayed labels.
+- An automated detector that records why it held back the suspicious transactions it did not escalate, and groups escalations into cases and rings.
+- A test harness that plants fraud rings and adversarial examples with known members, including a white-box attack on the GNN.
+
+The full write-up is in the COS 700 research report.
+### The research
+
+The project asked:
+
+> *Can a graph neural network, trained semi-supervised and combined with a reinforcement-learning decision agent, detect card-not-present fraud in real time with fewer false alarms when only a small, delayed fraction of transaction labels is available, and can its decisions be explained?*
+
 A Django test bench for one fraud model: a **graph neural network** (GNN). Upload any labelled card-transaction CSV and the app trains the GNN on it, then tests it three ways:
 
 1. **Full graph.** The whole file is one graph; how well can the GNN separate fraud when it sees every connection?
