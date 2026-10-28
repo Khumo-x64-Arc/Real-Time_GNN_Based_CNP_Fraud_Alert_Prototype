@@ -1,4 +1,13 @@
-# Khumo Detection Fraud Systems
+<p align="center">
+  <img src="docs/images/khumo-detection-systems-logo.png" alt="Khumo Detection Systems" height="130">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/images/university-of-pretoria-logo.png" alt="University of Pretoria: Make today matter" height="130">
+</p>
+
+
+# Khumo Detection Fraud Systems for 2026 COS700 Research 
+
+In fulfillment of the 2026 COS 700 research project for the BSc Honours in Computer Science at the University of Pretoria, under the supervision of Prof Jan Eloff.
 
 A Django test bench for one fraud model: a **graph neural network** (GNN). Upload any labelled card-transaction CSV and the app trains the GNN on it, then tests it three ways:
 
