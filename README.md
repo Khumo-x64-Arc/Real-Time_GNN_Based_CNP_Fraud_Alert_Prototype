@@ -17,7 +17,7 @@ A Django test bench for one fraud model: a **graph neural network** (GNN). Uploa
 
 It then replays the test period through the GNN in real time and raises alerts that explain themselves with graph evidence and behavioural signals.
 
-This version tests the GNN only. Earlier versions also trained XGBoost, a stacked ensemble and an LSTM-CNN; those models, and the averaged "Combined" score, have been removed, and `xgboost` is no longer a dependency. The transfer-learning pages (scoring unlabelled files with a GNN trained elsewhere, and fine-tuning pre-trained GNNs) have also been removed. Automation now always trains the GNN on the file's own revealed labels. Migration `0009` drops their tables; automation runs made earlier still display.
+Automation  always trains the GNN on the file's own revealed labels. Migration `0009` drops their tables however automation runs made earlier still display.
 
 The **RL agent** section adds a reinforcement-learning agent (a Deep Q-Network, after FraudGNN-RL) on top of a semi-supervised version of the GNN, evaluated on the European Cardholder and IEEE-CIS benchmarks. See [RL agent](#rl-agent-semi-supervised-gnn--deep-q-network-rl) below.
 
@@ -34,7 +34,7 @@ python manage.py runserver
 
 The analyst console at http://127.0.0.1:8000 needs a staff login. The customer portal lives at http://127.0.0.1:8000/my/.
 
-Open http://127.0.0.1:8000, choose **Upload**, and drop in `creditcard_cnp_20k-1.csv`. Training and testing take under a minute for 20,000 rows. After that the dataset page shows the GNN's test report, and **Open live monitor** starts the stream.
+Open http://127.0.0.1:8000, choose **Upload**, and drop in `creditcard_cnp.csv`. Training and testing take under a minute for 20,000 rows. After that the dataset page shows the GNN's test report, and **Open live monitor** starts the stream.
 
 For big files you can train from the command line instead:
 
