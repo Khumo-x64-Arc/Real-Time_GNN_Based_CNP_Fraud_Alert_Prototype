@@ -8,6 +8,7 @@
 # Khumo Detection Fraud Systems for 2026 COS700 Research 
 
 In fulfillment of the 2026 COS 700 research project for the BSc Honours in Computer Science at the University of Pretoria, under the supervision of Prof Jan Eloff.
+**Note** GitHub Pages cannot host Django projects thus besides downloading the files on your computer, a link to a working version of the prototype is :  
 
 
 ## About
